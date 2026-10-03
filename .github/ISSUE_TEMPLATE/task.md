@@ -1,10 +1,10 @@
 ---
 name: 🛠 기타 작업
-about: 리팩터링, 디자인, 설정, 테스트, CI 작업을 등록합니다.
+about: 리팩터링, 설정, 테스트, CI 작업을 등록합니다.
 title: "[CHORE] "
 ---
 
-<!-- 작업에 맞게 제목의 TYPE을 [REFACTOR], [DESIGN], [CHORE], [TEST], [CI] 중 하나로 지정합니다. -->
+<!-- 작업에 맞게 제목의 TYPE을 [REFACTOR], [CHORE], [TEST], [CI] 중 하나로 지정합니다. -->
 
 ## 📝 설명
 
