@@ -1,5 +1,5 @@
 ---
-name: 문서 작업
+name: 📚 문서 (DOCS)
 about: 문서와 가이드라인 작성 및 수정 작업을 등록합니다.
 title: "[DOCS] "
 labels: documentation

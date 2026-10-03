@@ -1,5 +1,5 @@
 ---
-name: 기능 추가
+name: ✨ 기능 (FEAT)
 about: 새로운 기능과 개선 작업을 등록합니다.
 title: "[FEAT] "
 labels: enhancement
