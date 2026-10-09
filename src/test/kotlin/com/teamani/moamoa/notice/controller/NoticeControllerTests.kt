@@ -2,7 +2,7 @@ package com.teamani.moamoa.notice.controller
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
-import com.teamani.moamoa.notice.dto.NoticeResponse
+import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.service.NoticeService
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
@@ -36,13 +36,14 @@ class NoticeControllerTests {
             title = "10월 회비 안내",
             content = "10월 회비는 10일까지 납부 부탁드립니다."
         )
-        val mockResponse = NoticeResponse(
+        val mockResponse = NoticeCreateResponse(
             noticeId = 30L,
             title = "10월 회비 안내"
         )
 
         `when`(noticeService.createNotice(meetingId, 1L, request)).thenReturn(mockResponse)
 
+        // when & then: 201 Created 및 규격 검증
         mockMvc.perform(
             post("/v1/meetings/$meetingId/notices")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -53,5 +54,25 @@ class NoticeControllerTests {
             .andExpect(jsonPath("$.data.title").value("10월 회비 안내"))
             .andExpect(jsonPath("$.data.noticeId").value(30L))
             .andExpect(jsonPath("$.error").doesNotExist())
+    }
+
+    @Test
+    @DisplayName("공지 제목이 50자를 초과하면 400 Bad Request를 반환한다")
+    fun createNoticeFailWhenTitleExceeds50() {
+        // given: 51글자 제목 생성
+        val meetingId = 1L
+        val longTitle = "a".repeat(51)
+        val request = NoticeCreateRequest(
+            title = longTitle,
+            content = "정상적인 공지 내용"
+        )
+
+        // when & then: 400 검증
+        mockMvc.perform(
+            post("/v1/meetings/$meetingId/notices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request))
+        )
+            .andExpect(status().isBadRequest)
     }
 }

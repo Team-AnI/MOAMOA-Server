@@ -1,7 +1,7 @@
 package com.teamani.moamoa.notice.service
 
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
-import com.teamani.moamoa.notice.dto.NoticeResponse
+import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.entity.Notice
 import com.teamani.moamoa.notice.repository.NoticeRepository
 import org.springframework.stereotype.Service
@@ -13,7 +13,7 @@ class NoticeService(
 ) {
 
     @Transactional
-    fun createNotice(meetingId: Long, userId: Long, request: NoticeCreateRequest): NoticeResponse {
+    fun createNotice(meetingId: Long, userId: Long, request: NoticeCreateRequest): NoticeCreateResponse {
         // 관리자(ADMIN) 권한 검증 (추후 Member 도메인 연동)
         validateAdmin(meetingId, userId)
 
@@ -29,7 +29,7 @@ class NoticeService(
         val savedNotice = noticeRepository.save(notice)
 
         // 성공 응답 DTO 반환
-        return NoticeResponse(
+        return NoticeCreateResponse(
             noticeId = checkNotNull(savedNotice.id) { "공지 식별자가 생성되지 않았습니다." },
             title = savedNotice.title
         )
