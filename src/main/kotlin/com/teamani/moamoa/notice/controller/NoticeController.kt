@@ -3,11 +3,13 @@ package com.teamani.moamoa.notice.controller
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
+import com.teamani.moamoa.notice.dto.NoticeDetailResponse
 import com.teamani.moamoa.notice.service.NoticeService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -52,6 +54,24 @@ class NoticeController(
         val response: NoticeDeleteResponse = noticeService.deleteNotice(meetingId, noticeId, currentUserId)
 
         // API 명세서 Envelope 포맷 규격: { success, data: { noticeId }, error: null, timestamp }
+        return ResponseEntity.ok(
+            mapOf(
+                "success" to true,
+                "data" to response,
+                "error" to null,
+                "timestamp" to OffsetDateTime.now()
+            )
+        )
+    }
+
+    @GetMapping("/{noticeId}")
+    fun getNoticeDetail(
+        @PathVariable meetingId: Long,
+        @PathVariable noticeId: Long
+    ): ResponseEntity<Map<String, Any?>> {
+        val currentUserId = 1L
+        val response: NoticeDetailResponse = noticeService.getNoticeDetail(meetingId, noticeId, currentUserId)
+
         return ResponseEntity.ok(
             mapOf(
                 "success" to true,

@@ -3,6 +3,7 @@ package com.teamani.moamoa.notice.service
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
+import com.teamani.moamoa.notice.dto.NoticeDetailResponse
 import com.teamani.moamoa.notice.entity.Notice
 import com.teamani.moamoa.notice.repository.NoticeRepository
 import org.springframework.stereotype.Service
@@ -58,5 +59,19 @@ class NoticeService(
         noticeRepository.delete(notice)
 
         return NoticeDeleteResponse(noticeId = noticeId)
+    }
+    @Transactional(readOnly = true)
+    fun getNoticeDetail(meetingId: Long, noticeId: Long, currentUserId: Long): NoticeDetailResponse {
+        val notice = noticeRepository.findById(noticeId)
+            .orElseThrow { IllegalArgumentException("공지사항을 찾을 수 없습니다. (ID: $noticeId)") }
+
+        require(notice.meetingId == meetingId) { "해당 모임의 공지사항이 아닙니다." }
+
+        return NoticeDetailResponse(
+            noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." },
+            title = notice.title,
+            content = notice.content,
+            createdAt = notice.createdAt
+        )
     }
 }

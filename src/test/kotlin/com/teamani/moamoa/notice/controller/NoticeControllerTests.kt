@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
+import com.teamani.moamoa.notice.dto.NoticeDetailResponse
 import com.teamani.moamoa.notice.service.NoticeService
 import io.kotest.core.spec.style.BehaviorSpec
 import org.mockito.Mockito.`when`
@@ -15,6 +16,8 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
+import java.time.OffsetDateTime
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 
 class NoticeControllerTests : BehaviorSpec({
 
@@ -101,6 +104,38 @@ class NoticeControllerTests : BehaviorSpec({
                     .andExpect(status().isOk)
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.noticeId").value(30L))
+                    .andExpect(jsonPath("$.error").doesNotExist())
+                    .andExpect(jsonPath("$.timestamp").exists())
+            }
+        }
+    }
+
+    Given("특정 공지사항 상세 조회 요청(GET)이 주어졌을 때") {
+        val meetingId = 1L
+        val noticeId = 30L
+        val now = OffsetDateTime.now()
+        val mockResponse = NoticeDetailResponse(
+            noticeId = noticeId,
+            title = "10월 회비 안내",
+            content = "10월 회비는 10일까지 납부 부탁드립니다.",
+            createdAt = now
+        )
+
+        `when`(noticeService.getNoticeDetail(meetingId, noticeId, 1L)).thenReturn(mockResponse)
+
+        When("상세 조회 API를 호출하면") {
+            val resultActions = mockMvc.perform(
+                get("/v1/meetings/$meetingId/notices/$noticeId")
+            )
+
+            Then("200 OK 응답과 상세 데이터 규격이 Envelope 형식으로 반환된다") {
+                resultActions
+                    .andExpect(status().isOk)
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.noticeId").value(30L))
+                    .andExpect(jsonPath("$.data.title").value("10월 회비 안내"))
+                    .andExpect(jsonPath("$.data.content").value("10월 회비는 10일까지 납부 부탁드립니다."))
+                    .andExpect(jsonPath("$.data.createdAt").exists())
                     .andExpect(jsonPath("$.error").doesNotExist())
                     .andExpect(jsonPath("$.timestamp").exists())
             }

@@ -2,6 +2,7 @@ package com.teamani.moamoa.notice.dto
 
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
+import java.time.OffsetDateTime
 
 data class NoticeCreateRequest(
     @field:NotBlank(message = "공지 제목은 필수입니다.")
@@ -14,9 +15,16 @@ data class NoticeCreateRequest(
 
 data class NoticeCreateResponse(
     val noticeId: Long,
-    val title: String
+    val title: String,
 )
 
 data class NoticeDeleteResponse(
     val noticeId: Long
+)
+
+data class NoticeDetailResponse(
+    val noticeId: Long,
+    val title: String,
+    val content: String,
+    val createdAt: OffsetDateTime
 )
