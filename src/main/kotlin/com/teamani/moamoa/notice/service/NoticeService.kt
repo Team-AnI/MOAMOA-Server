@@ -20,7 +20,7 @@ class NoticeService(
         // 요청 DTO 값으로 실제 Entity 객체 생성
         val notice = Notice(
             meetingId = meetingId,
-            authorId = userId,
+            membersId = userId,
             title = requireNotNull(request.title) { "제목은 필수입니다." },
             content = requireNotNull(request.content) { "내용은 필수입니다." }
         )

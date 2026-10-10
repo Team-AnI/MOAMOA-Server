@@ -18,7 +18,7 @@ class Notice(
 
     // 공지 작성자(회원) ID
     @Column(nullable = false)
-    val authorId: Long,
+    val membersId: Long,
 
     // 공지 제목 (최대 50자)
     @Column(nullable = false, length = 50)
@@ -31,6 +31,10 @@ class Notice(
     // 등록 일시 (ISO-8601 기준)
     @Column(nullable = false, updatable = false)
     val createdAt: OffsetDateTime = OffsetDateTime.now(),
+
+    // 공지 종료 일시 (ERD: ended_at, NULL 허용)
+    @Column(nullable = true)
+    var endedAt: OffsetDateTime? = null,
 
     // 기본 키 (PK)
     @Id
