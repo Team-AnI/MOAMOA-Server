@@ -2,7 +2,6 @@ package com.teamani.moamoa.notice.dto
 
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
-import java.time.OffsetDateTime
 
 data class NoticeCreateRequest(
     @field:NotBlank(message = "공지 제목은 필수입니다.")
