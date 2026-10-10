@@ -28,7 +28,7 @@ Team AnI의 MOAMOA Spring Boot · Kotlin 서버 저장소입니다.
 | Gradle | 9.3.0 | `gradle/wrapper/gradle-wrapper.properties` |
 | Swagger / OpenAPI | springdoc-openapi 3.1.1 | `build.gradle.kts` |
 
-Spring MVC, Spring Data JPA, Bean Validation, JUnit 기반 테스트를 사용합니다. 서버 실행에는 PostgreSQL이 필요하며, 테스트는 `test` Profile의 메모리 H2를 사용해 별도 DB 설치 없이 실행할 수 있습니다.
+Spring MVC, Spring Data JPA, Bean Validation, Kotest BehaviorSpec 기반 테스트를 사용합니다. 서버 실행에는 PostgreSQL이 필요하며, 테스트는 `test` Profile의 메모리 H2를 사용해 별도 DB 설치 없이 실행할 수 있습니다.
 
 #### 1-2. 환경 및 IDE 설정
 
