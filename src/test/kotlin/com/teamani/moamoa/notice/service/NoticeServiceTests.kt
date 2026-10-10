@@ -60,6 +60,7 @@ import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.`when`
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.verify
+import java.util.Optional
 
 class NoticeServiceTests : BehaviorSpec({
 
@@ -75,11 +76,11 @@ class NoticeServiceTests : BehaviorSpec({
         )
 
         val savedEntity = Notice(
+            id = 30L,
             meetingId = meetingId,
             membersId = userId,
             title = requireNotNull(request.title),
-            content = requireNotNull(request.content),
-            id = 30L
+            content = requireNotNull(request.content)
         )
 
         `when`(noticeRepository.save(any(Notice::class.java))).thenReturn(savedEntity)
@@ -92,6 +93,30 @@ class NoticeServiceTests : BehaviorSpec({
                 response.noticeId shouldBe 30L
                 response.title shouldBe "10월 회비 안내"
                 verify(noticeRepository).save(any(Notice::class.java))
+            }
+        }
+    }
+    Given("삭제할 공지사항 식별자가 주어졌을 때") {
+        val meetingId = 1L
+        val noticeId = 30L
+        val userId = 1L
+        val targetNotice = Notice(
+            id = noticeId,
+            meetingId = meetingId,
+            membersId = userId,
+            title = "삭제할 공지",
+            content = "삭제할 공지 내용"
+        )
+
+        `when`(noticeRepository.findById(noticeId)).thenReturn(Optional.of(targetNotice))
+
+        When("deleteNotice 메서드를 호출하면") {
+            val response = noticeService.deleteNotice(meetingId, noticeId, userId)
+
+            Then("공지가 삭제되고 삭제된 noticeId가 반환된다") {
+                response.shouldNotBeNull()
+                response.noticeId shouldBe 30L
+                verify(noticeRepository).delete(targetNotice)
             }
         }
     }

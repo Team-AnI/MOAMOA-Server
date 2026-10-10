@@ -2,6 +2,7 @@ package com.teamani.moamoa.notice.service
 
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeCreateResponse
+import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
 import com.teamani.moamoa.notice.entity.Notice
 import com.teamani.moamoa.notice.repository.NoticeRepository
 import org.springframework.stereotype.Service
@@ -39,5 +40,23 @@ class NoticeService(
     private fun validateAdmin(meetingId: Long, userId: Long) {
         // TODO: memberService 또는 memberRepository를 조회하여 해당 사용자가 모임의 ADMIN인지 확인
         // 만약 ADMIN이 아니면 403 FORBIDDEN 성격의 예외(CustomException)를 throw하도록 연결.
+    }
+
+    @Transactional
+    fun deleteNotice(meetingId: Long, noticeId: Long, userId: Long): NoticeDeleteResponse {
+        // ADMIN 권한 검증 (Member 도메인 연동 후속 이슈 처리 예정)
+        validateAdmin(meetingId, userId)
+
+        // 공지 조회 (존재하지 않으면 예외 발생)
+        val notice = noticeRepository.findById(noticeId)
+            .orElseThrow { IllegalArgumentException("공지사항을 찾을 수 없습니다. id: $noticeId") }
+
+        // 해당 모임에 속한 공지인지 검증
+        require(notice.meetingId == meetingId) { "해당 모임의 공지사항이 아닙니다." }
+
+        // DB 삭제
+        noticeRepository.delete(notice)
+
+        return NoticeDeleteResponse(noticeId = noticeId)
     }
 }

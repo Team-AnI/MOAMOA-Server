@@ -2,10 +2,12 @@ package com.teamani.moamoa.notice.controller
 
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeCreateResponse
+import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
 import com.teamani.moamoa.notice.service.NoticeService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -31,6 +33,26 @@ class NoticeController(
 
         // API 명세서 Envelope 포맷 규격: { success, data, error, timestamp }
         return ResponseEntity.status(HttpStatus.CREATED).body(
+            mapOf(
+                "success" to true,
+                "data" to response,
+                "error" to null,
+                "timestamp" to OffsetDateTime.now()
+            )
+        )
+    }
+
+    @DeleteMapping("/{noticeId}")
+    fun deleteNotice(
+        @PathVariable meetingId: Long,
+        @PathVariable noticeId: Long
+    ): ResponseEntity<Map<String, Any?>> {
+        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
+
+        val response: NoticeDeleteResponse = noticeService.deleteNotice(meetingId, noticeId, currentUserId)
+
+        // API 명세서 Envelope 포맷 규격: { success, data: { noticeId }, error: null, timestamp }
+        return ResponseEntity.ok(
             mapOf(
                 "success" to true,
                 "data" to response,
