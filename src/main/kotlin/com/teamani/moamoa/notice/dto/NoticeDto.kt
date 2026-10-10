@@ -28,3 +28,16 @@ data class NoticeDetailResponse(
     val content: String,
     val createdAt: OffsetDateTime
 )
+
+data class NoticeSummaryResponse(
+    val noticeId: Long,
+    val title: String,
+    val createdAt: OffsetDateTime
+)
+
+data class NoticeListResponse(
+    val notices: List<NoticeSummaryResponse>,
+    val page: Int,
+    val size: Int,
+    val hasNext: Boolean
+)

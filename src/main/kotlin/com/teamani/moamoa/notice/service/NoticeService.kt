@@ -4,8 +4,12 @@ import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
 import com.teamani.moamoa.notice.dto.NoticeDetailResponse
+import com.teamani.moamoa.notice.dto.NoticeListResponse
+import com.teamani.moamoa.notice.dto.NoticeSummaryResponse
 import com.teamani.moamoa.notice.entity.Notice
 import com.teamani.moamoa.notice.repository.NoticeRepository
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -72,6 +76,32 @@ class NoticeService(
             title = notice.title,
             content = notice.content,
             createdAt = notice.createdAt
+        )
+    }
+
+    @Transactional(readOnly = true)
+    fun getNotices(
+        meetingId: Long,
+        page: Int,
+        size: Int,
+        currentUserId: Long
+    ): NoticeListResponse {
+        val pageable = PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))
+        val noticePage = noticeRepository.findAllByMeetingId(meetingId, pageable)
+
+        val summaries = noticePage.content.map { notice ->
+            NoticeSummaryResponse(
+                noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." },
+                title = notice.title,
+                createdAt = notice.createdAt
+            )
+        }
+
+        return NoticeListResponse(
+            notices = summaries,
+            page = noticePage.number,
+            size = noticePage.size,
+            hasNext = noticePage.hasNext()
         )
     }
 }
