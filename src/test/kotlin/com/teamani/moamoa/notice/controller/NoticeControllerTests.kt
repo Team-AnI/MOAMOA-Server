@@ -7,6 +7,9 @@ import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
 import com.teamani.moamoa.notice.dto.NoticeDetailResponse
 import com.teamani.moamoa.notice.dto.NoticeListResponse
 import com.teamani.moamoa.notice.dto.NoticeSummaryResponse
+import com.teamani.moamoa.notice.dto.NoticeUpdateRequest
+import com.teamani.moamoa.notice.dto.NoticeUpdateResponse
+import com.teamani.moamoa.notice.exception.NoticeNotFoundException
 import com.teamani.moamoa.notice.service.NoticeService
 import io.kotest.core.spec.style.BehaviorSpec
 import org.mockito.Mockito.`when`
@@ -15,6 +18,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -204,6 +208,90 @@ class NoticeControllerTests : BehaviorSpec({
             val resultActions = mockMvc.perform(
                 get("/v1/meetings/$meetingId/notices")
                     .param("size", "101")
+            )
+
+            Then("400 Bad Request를 반환한다") {
+                resultActions.andExpect(status().isBadRequest)
+            }
+        }
+    }
+
+    Given("제목만 담긴 공지사항 수정 요청(PATCH)이 주어졌을 때") {
+        val meetingId = 1L
+        val noticeId = 30L
+        val request = NoticeUpdateRequest(title = "수정된 제목")
+        val mockResponse = NoticeUpdateResponse(
+            noticeId = noticeId,
+            title = "수정된 제목",
+            content = "기존 내용"
+        )
+
+        `when`(noticeService.updateNotice(meetingId, noticeId, 1L, request)).thenReturn(mockResponse)
+
+        When("수정 API를 호출하면") {
+            val resultActions = mockMvc.perform(
+                patch("/v1/meetings/$meetingId/notices/$noticeId")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(request))
+            )
+
+            Then("200 OK 응답과 수정된 데이터가 Envelope 형식으로 반환된다") {
+                resultActions
+                    .andExpect(status().isOk)
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.noticeId").value(30L))
+                    .andExpect(jsonPath("$.data.title").value("수정된 제목"))
+                    .andExpect(jsonPath("$.data.content").value("기존 내용"))
+                    .andExpect(jsonPath("$.error").doesNotExist())
+                    .andExpect(jsonPath("$.timestamp").exists())
+            }
+        }
+    }
+
+    Given("존재하지 않거나 다른 모임의 공지사항 수정 요청이 주어졌을 때") {
+        val meetingId = 1L
+        val noticeId = 999L
+        val request = NoticeUpdateRequest(title = "수정된 제목")
+
+        `when`(noticeService.updateNotice(meetingId, noticeId, 1L, request))
+            .thenThrow(NoticeNotFoundException("공지사항을 찾을 수 없습니다. (ID: $noticeId)"))
+
+        When("수정 API를 호출하면") {
+            val resultActions = mockMvc.perform(
+                patch("/v1/meetings/$meetingId/notices/$noticeId")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(request))
+            )
+
+            Then("404 Not Found를 반환한다") {
+                resultActions.andExpect(status().isNotFound)
+            }
+        }
+    }
+
+    Given("공백 제목 또는 공백 내용이 담긴 공지사항 수정 요청이 주어졌을 때") {
+        val meetingId = 1L
+        val noticeId = 30L
+        val blankTitleRequest = NoticeUpdateRequest(title = "   ")
+        val emptyContentRequest = NoticeUpdateRequest(content = "")
+
+        When("공백 제목으로 수정 API를 호출하면") {
+            val resultActions = mockMvc.perform(
+                patch("/v1/meetings/$meetingId/notices/$noticeId")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(blankTitleRequest))
+            )
+
+            Then("400 Bad Request를 반환한다") {
+                resultActions.andExpect(status().isBadRequest)
+            }
+        }
+
+        When("빈 문자열 내용으로 수정 API를 호출하면") {
+            val resultActions = mockMvc.perform(
+                patch("/v1/meetings/$meetingId/notices/$noticeId")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(emptyContentRequest))
             )
 
             Then("400 Bad Request를 반환한다") {

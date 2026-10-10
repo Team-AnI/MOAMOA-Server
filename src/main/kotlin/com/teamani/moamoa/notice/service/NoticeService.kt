@@ -6,7 +6,10 @@ import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
 import com.teamani.moamoa.notice.dto.NoticeDetailResponse
 import com.teamani.moamoa.notice.dto.NoticeListResponse
 import com.teamani.moamoa.notice.dto.NoticeSummaryResponse
+import com.teamani.moamoa.notice.dto.NoticeUpdateRequest
+import com.teamani.moamoa.notice.dto.NoticeUpdateResponse
 import com.teamani.moamoa.notice.entity.Notice
+import com.teamani.moamoa.notice.exception.NoticeNotFoundException
 import com.teamani.moamoa.notice.repository.NoticeRepository
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -102,6 +105,31 @@ class NoticeService(
             page = noticePage.number,
             size = noticePage.size,
             hasNext = noticePage.hasNext()
+        )
+    }
+
+    @Transactional
+    fun updateNotice(
+        meetingId: Long,
+        noticeId: Long,
+        userId: Long,
+        request: NoticeUpdateRequest
+    ): NoticeUpdateResponse {
+        // ADMIN 권한 검증 (Member 도메인 연동 후속 이슈 처리 예정)
+        validateAdmin(meetingId, userId)
+
+        // 공지가 없거나 다른 모임의 공지면 404
+        val notice = noticeRepository.findById(noticeId)
+            .filter { it.meetingId == meetingId }
+            .orElseThrow { NoticeNotFoundException("공지사항을 찾을 수 없습니다. (ID: $noticeId)") }
+
+        // 변경 감지(Dirty Checking)로 트랜잭션 종료 시 반영
+        notice.update(request.title, request.content)
+
+        return NoticeUpdateResponse(
+            noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." },
+            title = notice.title,
+            content = notice.content
         )
     }
 }

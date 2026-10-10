@@ -1,8 +1,11 @@
 package com.teamani.moamoa.notice.service
 
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
+import com.teamani.moamoa.notice.dto.NoticeUpdateRequest
 import com.teamani.moamoa.notice.entity.Notice
+import com.teamani.moamoa.notice.exception.NoticeNotFoundException
 import com.teamani.moamoa.notice.repository.NoticeRepository
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -145,6 +148,73 @@ class NoticeServiceTests : BehaviorSpec({
                 response.size shouldBe 20
                 response.hasNext shouldBe false
                 verify(noticeRepository).findAllByMeetingId(meetingId, pageable)
+            }
+        }
+    }
+
+    Given("제목만 담긴 공지사항 수정 요청이 주어졌을 때") {
+        val meetingId = 1L
+        val noticeId = 40L
+        val userId = 1L
+        val notice = Notice(
+            id = noticeId,
+            meetingId = meetingId,
+            membersId = userId,
+            title = "기존 제목",
+            content = "기존 내용"
+        )
+        val request = NoticeUpdateRequest(title = "수정된 제목")
+
+        `when`(noticeRepository.findById(noticeId)).thenReturn(Optional.of(notice))
+
+        When("updateNotice를 호출하면") {
+            val response = noticeService.updateNotice(meetingId, noticeId, userId, request)
+
+            Then("제목만 변경되고 내용은 기존 값이 유지된다") {
+                response.noticeId shouldBe noticeId
+                response.title shouldBe "수정된 제목"
+                response.content shouldBe "기존 내용"
+                notice.title shouldBe "수정된 제목"
+                notice.content shouldBe "기존 내용"
+            }
+        }
+    }
+
+    Given("존재하지 않는 공지사항에 대한 수정 요청이 주어졌을 때") {
+        val meetingId = 1L
+        val noticeId = 41L
+        val request = NoticeUpdateRequest(title = "수정된 제목")
+
+        `when`(noticeRepository.findById(noticeId)).thenReturn(Optional.empty())
+
+        When("updateNotice를 호출하면") {
+            Then("NoticeNotFoundException이 발생한다") {
+                shouldThrow<NoticeNotFoundException> {
+                    noticeService.updateNotice(meetingId, noticeId, 1L, request)
+                }
+            }
+        }
+    }
+
+    Given("다른 모임의 공지사항에 대한 수정 요청이 주어졌을 때") {
+        val noticeId = 42L
+        val notice = Notice(
+            id = noticeId,
+            meetingId = 2L,
+            membersId = 1L,
+            title = "다른 모임 공지",
+            content = "다른 모임 공지 내용"
+        )
+        val request = NoticeUpdateRequest(title = "수정된 제목")
+
+        `when`(noticeRepository.findById(noticeId)).thenReturn(Optional.of(notice))
+
+        When("요청한 모임 ID로 updateNotice를 호출하면") {
+            Then("NoticeNotFoundException이 발생하고 공지는 변경되지 않는다") {
+                shouldThrow<NoticeNotFoundException> {
+                    noticeService.updateNotice(1L, noticeId, 1L, request)
+                }
+                notice.title shouldBe "다른 모임 공지"
             }
         }
     }
