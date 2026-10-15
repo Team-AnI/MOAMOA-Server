@@ -6,8 +6,12 @@ import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
 import com.teamani.moamoa.notice.dto.NoticeDetailResponse
+import com.teamani.moamoa.notice.dto.NoticeListResponse
+import com.teamani.moamoa.notice.dto.NoticeSummaryResponse
 import com.teamani.moamoa.notice.entity.Notice
 import com.teamani.moamoa.notice.repository.NoticeRepository
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -63,15 +67,40 @@ class NoticeService(
     @Transactional(readOnly = true)
     fun getNoticeDetail(meetingId: Long, noticeId: Long, currentUserId: Long): NoticeDetailResponse {
         val notice = noticeRepository.findById(noticeId)
-            .orElseThrow { IllegalArgumentException("공지사항을 찾을 수 없습니다. (ID: $noticeId)") }
-
-        require(notice.meetingId == meetingId) { "해당 모임의 공지사항이 아닙니다." }
+            .filter { it.meetingId == meetingId }
+            .orElseThrow { ApiException(ErrorCode.NOT_FOUND, "공지사항을 찾을 수 없습니다.") }
 
         return NoticeDetailResponse(
             noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." },
             title = notice.title,
             content = notice.content,
             createdAt = notice.createdAt
+        )
+    }
+
+    @Transactional(readOnly = true)
+    fun getNotices(
+        meetingId: Long,
+        page: Int,
+        size: Int,
+        currentUserId: Long
+    ): NoticeListResponse {
+        val pageable = PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))
+        val noticePage = noticeRepository.findAllByMeetingId(meetingId, pageable)
+
+        val summaries = noticePage.content.map { notice ->
+            NoticeSummaryResponse(
+                noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." },
+                title = notice.title,
+                createdAt = notice.createdAt
+            )
+        }
+
+        return NoticeListResponse(
+            notices = summaries,
+            page = noticePage.number,
+            size = noticePage.size,
+            hasNext = noticePage.hasNext()
         )
     }
 }

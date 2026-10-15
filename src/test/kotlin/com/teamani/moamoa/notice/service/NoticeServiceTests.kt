@@ -15,6 +15,9 @@ import org.mockito.Mockito.clearInvocations
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
+import org.springframework.data.domain.PageImpl
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import java.time.OffsetDateTime
 import java.util.Optional
 
@@ -112,6 +115,44 @@ class NoticeServiceTests : BehaviorSpec({
         }
     }
 
+    Given("공지사항 목록 조회 요청이 주어졌을 때") {
+        val meetingId = 1L
+        val userId = 1L
+        val page = 0
+        val size = 20
+        val pageable = PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))
+        val now = OffsetDateTime.now()
+
+        val noticeList = listOf(
+            Notice(
+                id = 30L,
+                meetingId = meetingId,
+                membersId = userId,
+                title = "10월 회비 안내",
+                content = "내용",
+                createdAt = now
+            )
+        )
+        val pageResult = PageImpl(noticeList, pageable, 1L)
+
+        `when`(noticeRepository.findAllByMeetingId(meetingId, pageable)).thenReturn(pageResult)
+
+        When("getNotices를 호출하면") {
+            val response = noticeService.getNotices(meetingId, page, size, userId)
+
+            Then("페이징 메타데이터와 공지 요약 목록이 반환된다") {
+                response.notices.size shouldBe 1
+                response.notices[0].noticeId shouldBe 30L
+                response.notices[0].title shouldBe "10월 회비 안내"
+                response.notices[0].createdAt shouldBe now
+                response.page shouldBe 0
+                response.size shouldBe 20
+                response.hasNext shouldBe false
+                verify(noticeRepository).findAllByMeetingId(meetingId, pageable)
+            }
+        }
+    }
+
     Given("존재하지 않는 공지사항 식별자가 주어졌을 때") {
         val repository: NoticeRepository = mock(NoticeRepository::class.java)
         val service = NoticeService(repository)
@@ -128,6 +169,16 @@ class NoticeServiceTests : BehaviorSpec({
             Then("NOT_FOUND 예외가 발생하고 삭제는 호출되지 않는다") {
                 exception.errorCode shouldBe ErrorCode.NOT_FOUND
                 verify(repository, never()).delete(any(Notice::class.java))
+            }
+        }
+
+        When("getNoticeDetail 메서드를 호출하면") {
+            val exception = shouldThrow<ApiException> {
+                service.getNoticeDetail(meetingId, noticeId, 1L)
+            }
+
+            Then("NOT_FOUND 예외가 발생한다") {
+                exception.errorCode shouldBe ErrorCode.NOT_FOUND
             }
         }
     }
@@ -153,6 +204,16 @@ class NoticeServiceTests : BehaviorSpec({
             Then("NOT_FOUND 예외가 발생하고 삭제는 호출되지 않는다") {
                 exception.errorCode shouldBe ErrorCode.NOT_FOUND
                 verify(repository, never()).delete(any(Notice::class.java))
+            }
+        }
+
+        When("getNoticeDetail 메서드를 호출하면") {
+            val exception = shouldThrow<ApiException> {
+                service.getNoticeDetail(1L, noticeId, 1L)
+            }
+
+            Then("NOT_FOUND 예외가 발생한다") {
+                exception.errorCode shouldBe ErrorCode.NOT_FOUND
             }
         }
     }

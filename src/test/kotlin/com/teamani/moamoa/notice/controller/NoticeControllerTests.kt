@@ -5,6 +5,8 @@ import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
 import com.teamani.moamoa.notice.dto.NoticeDetailResponse
+import com.teamani.moamoa.notice.dto.NoticeListResponse
+import com.teamani.moamoa.notice.dto.NoticeSummaryResponse
 import com.teamani.moamoa.notice.service.NoticeService
 import io.kotest.core.spec.style.BehaviorSpec
 import org.mockito.Mockito.`when`
@@ -12,12 +14,12 @@ import org.mockito.Mockito.mock
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import java.time.OffsetDateTime
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 
 class NoticeControllerTests : BehaviorSpec({
 
@@ -138,6 +140,74 @@ class NoticeControllerTests : BehaviorSpec({
                     .andExpect(jsonPath("$.data.createdAt").exists())
                     .andExpect(jsonPath("$.error").doesNotExist())
                     .andExpect(jsonPath("$.timestamp").exists())
+            }
+        }
+    }
+
+    Given("공지사항 목록 조회 요청(GET)이 주어졌을 때") {
+        val meetingId = 1L
+        val page = 0
+        val size = 20
+        val now = OffsetDateTime.now()
+        val mockResponse = NoticeListResponse(
+            notices = listOf(
+                NoticeSummaryResponse(
+                    noticeId = 30L,
+                    title = "10월 회비 안내",
+                    createdAt = now
+                )
+            ),
+            page = 0,
+            size = 20,
+            hasNext = false
+        )
+
+        `when`(noticeService.getNotices(meetingId, page, size, 1L)).thenReturn(mockResponse)
+
+        When("목록 조회 API를 호출하면") {
+            val resultActions = mockMvc.perform(
+                get("/v1/meetings/$meetingId/notices")
+                    .param("page", "0")
+                    .param("size", "20")
+            )
+
+            Then("200 OK 응답과 notices 배열 및 페이징 정보가 반환된다") {
+                resultActions
+                    .andExpect(status().isOk)
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.notices[0].noticeId").value(30L))
+                    .andExpect(jsonPath("$.data.notices[0].title").value("10월 회비 안내"))
+                    .andExpect(jsonPath("$.data.notices[0].createdAt").exists())
+                    .andExpect(jsonPath("$.data.page").value(0))
+                    .andExpect(jsonPath("$.data.size").value(20))
+                    .andExpect(jsonPath("$.data.hasNext").value(false))
+                    .andExpect(jsonPath("$.timestamp").exists())
+            }
+        }
+    }
+
+    Given("page가 음수이거나 size가 허용 범위를 벗어난 목록 조회 요청이 주어졌을 때") {
+        val meetingId = 1L
+
+        When("음수 page로 목록 조회 API를 호출하면") {
+            val resultActions = mockMvc.perform(
+                get("/v1/meetings/$meetingId/notices")
+                    .param("page", "-1")
+            )
+
+            Then("400 Bad Request를 반환한다") {
+                resultActions.andExpect(status().isBadRequest)
+            }
+        }
+
+        When("100을 초과한 size로 목록 조회 API를 호출하면") {
+            val resultActions = mockMvc.perform(
+                get("/v1/meetings/$meetingId/notices")
+                    .param("size", "101")
+            )
+
+            Then("400 Bad Request를 반환한다") {
+                resultActions.andExpect(status().isBadRequest)
             }
         }
     }
