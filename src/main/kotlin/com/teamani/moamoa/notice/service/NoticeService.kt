@@ -2,8 +2,17 @@ package com.teamani.moamoa.notice.service
 
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeCreateResponse
+import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
+import com.teamani.moamoa.notice.dto.NoticeDetailResponse
+import com.teamani.moamoa.notice.dto.NoticeListResponse
+import com.teamani.moamoa.notice.dto.NoticeSummaryResponse
+import com.teamani.moamoa.notice.dto.NoticeUpdateRequest
+import com.teamani.moamoa.notice.dto.NoticeUpdateResponse
 import com.teamani.moamoa.notice.entity.Notice
+import com.teamani.moamoa.notice.exception.NoticeNotFoundException
 import com.teamani.moamoa.notice.repository.NoticeRepository
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -39,5 +48,88 @@ class NoticeService(
     private fun validateAdmin(meetingId: Long, userId: Long) {
         // TODO: memberService 또는 memberRepository를 조회하여 해당 사용자가 모임의 ADMIN인지 확인
         // 만약 ADMIN이 아니면 403 FORBIDDEN 성격의 예외(CustomException)를 throw하도록 연결.
+    }
+
+    @Transactional
+    fun deleteNotice(meetingId: Long, noticeId: Long, userId: Long): NoticeDeleteResponse {
+        // ADMIN 권한 검증 (Member 도메인 연동 후속 이슈 처리 예정)
+        validateAdmin(meetingId, userId)
+
+        // 공지 조회 (존재하지 않으면 예외 발생)
+        val notice = noticeRepository.findById(noticeId)
+            .orElseThrow { IllegalArgumentException("공지사항을 찾을 수 없습니다. id: $noticeId") }
+
+        // 해당 모임에 속한 공지인지 검증
+        require(notice.meetingId == meetingId) { "해당 모임의 공지사항이 아닙니다." }
+
+        // DB 삭제
+        noticeRepository.delete(notice)
+
+        return NoticeDeleteResponse(noticeId = noticeId)
+    }
+    @Transactional(readOnly = true)
+    fun getNoticeDetail(meetingId: Long, noticeId: Long, currentUserId: Long): NoticeDetailResponse {
+        val notice = noticeRepository.findById(noticeId)
+            .orElseThrow { IllegalArgumentException("공지사항을 찾을 수 없습니다. (ID: $noticeId)") }
+
+        require(notice.meetingId == meetingId) { "해당 모임의 공지사항이 아닙니다." }
+
+        return NoticeDetailResponse(
+            noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." },
+            title = notice.title,
+            content = notice.content,
+            createdAt = notice.createdAt
+        )
+    }
+
+    @Transactional(readOnly = true)
+    fun getNotices(
+        meetingId: Long,
+        page: Int,
+        size: Int,
+        currentUserId: Long
+    ): NoticeListResponse {
+        val pageable = PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))
+        val noticePage = noticeRepository.findAllByMeetingId(meetingId, pageable)
+
+        val summaries = noticePage.content.map { notice ->
+            NoticeSummaryResponse(
+                noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." },
+                title = notice.title,
+                createdAt = notice.createdAt
+            )
+        }
+
+        return NoticeListResponse(
+            notices = summaries,
+            page = noticePage.number,
+            size = noticePage.size,
+            hasNext = noticePage.hasNext()
+        )
+    }
+
+    @Transactional
+    fun updateNotice(
+        meetingId: Long,
+        noticeId: Long,
+        userId: Long,
+        request: NoticeUpdateRequest
+    ): NoticeUpdateResponse {
+        // ADMIN 권한 검증 (Member 도메인 연동 후속 이슈 처리 예정)
+        validateAdmin(meetingId, userId)
+
+        // 공지가 없거나 다른 모임의 공지면 404
+        val notice = noticeRepository.findById(noticeId)
+            .filter { it.meetingId == meetingId }
+            .orElseThrow { NoticeNotFoundException("공지사항을 찾을 수 없습니다. (ID: $noticeId)") }
+
+        // 변경 감지(Dirty Checking)로 트랜잭션 종료 시 반영
+        notice.update(request.title, request.content)
+
+        return NoticeUpdateResponse(
+            noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." },
+            title = notice.title,
+            content = notice.content
+        )
     }
 }
