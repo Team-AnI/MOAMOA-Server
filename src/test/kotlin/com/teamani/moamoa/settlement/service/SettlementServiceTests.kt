@@ -2,6 +2,9 @@ package com.teamani.moamoa.settlement.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.notice.dto.NoticeCreateRequest
+import com.teamani.moamoa.notice.dto.NoticeCreateResponse
+import com.teamani.moamoa.notice.service.NoticeService
 import com.teamani.moamoa.settlement.dto.SettlementCreateRequest
 import com.teamani.moamoa.settlement.entity.PaymentStatus
 import com.teamani.moamoa.settlement.entity.Settlement
@@ -22,22 +25,24 @@ import org.mockito.Mockito.clearInvocations
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import java.time.OffsetDateTime
 
 class SettlementServiceTests : BehaviorSpec({
 
     val settlementRepository: SettlementRepository = mock(SettlementRepository::class.java)
     val settlementMemberRepository: SettlementMemberRepository = mock(SettlementMemberRepository::class.java)
-    val settlementService = SettlementService(settlementRepository, settlementMemberRepository)
+    val noticeService: NoticeService = mock(NoticeService::class.java)
+    val settlementService = SettlementService(settlementRepository, settlementMemberRepository, noticeService)
 
-    afterEach { clearInvocations(settlementRepository, settlementMemberRepository) }
+    afterEach { clearInvocations(settlementRepository, settlementMemberRepository, noticeService) }
 
-    fun settlement(id: Long, createdAt: String = "2026-10-14T01:00:00Z") = Settlement(
+    fun settlement(id: Long, createdAt: String = "2026-10-14T01:00:00Z", title: String = "10월 정기 모임 식비") = Settlement(
         id = id,
         meetingId = 1L,
         scheduleId = 20L,
         createdBy = 1L,
-        title = "10월 정기 모임 식비",
+        title = title,
         totalAmount = 45000,
         bankName = "국민은행",
         accountNumber = "123456789012",
@@ -114,6 +119,78 @@ class SettlementServiceTests : BehaviorSpec({
                 response.memberCount shouldBe 3
                 response.status shouldBe SettlementStatus.IN_PROGRESS
                 response.noticeId.shouldBeNull()
+                verifyNoInteractions(noticeService)
+            }
+        }
+    }
+
+    Given("공지 자동 연동을 켠 정산 생성 요청이 주어졌을 때") {
+        val request = SettlementCreateRequest(
+            scheduleId = 20L,
+            title = "10월 정기 모임 식비",
+            totalAmount = 10000,
+            memberIds = listOf(1L, 5L, 9L),
+            bankName = "국민은행",
+            accountNumber = "123456789012",
+            accountHolder = "김모아",
+            dueAt = OffsetDateTime.parse("2026-10-20T14:59:00Z"),
+            postNotice = true
+        )
+        val expectedNotice = NoticeCreateRequest(
+            title = "[정산] 10월 정기 모임 식비",
+            content = "정산명: 10월 정기 모임 식비\n" +
+                "기본 1인당 금액: 3,333원\n" +
+                "입금 계좌: 국민은행 123456789012 (김모아)\n" +
+                "납부 기한: 2026-10-20 23:59\n" +
+                "개인별 실제 납부 금액은 정산 상세에서 확인해 주세요."
+        )
+
+        `when`(settlementRepository.save(any(Settlement::class.java))).thenReturn(settlement(40L))
+        `when`(noticeService.createNotice(1L, 1L, expectedNotice))
+            .thenReturn(NoticeCreateResponse(noticeId = 12L, title = "[정산] 10월 정기 모임 식비"))
+
+        When("createSettlement 메서드를 호출하면") {
+            val response = settlementService.createSettlement(1L, 1L, request)
+
+            Then("정산 안내 공지가 생성되고 정산에 공지 ID가 연결된다") {
+                verify(noticeService).createNotice(1L, 1L, expectedNotice)
+                response.noticeId shouldBe 12L
+            }
+        }
+    }
+
+    Given("정산명이 길어 공지 제목이 50자를 넘는 정산 생성 요청이 주어졌을 때") {
+        val longTitle = "가".repeat(50)
+        val request = SettlementCreateRequest(
+            title = longTitle,
+            totalAmount = 10000,
+            memberIds = listOf(1L),
+            bankName = "국민은행",
+            accountNumber = "123456789012",
+            accountHolder = "김모아",
+            dueAt = OffsetDateTime.parse("2026-10-20T14:59:00Z"),
+            postNotice = true
+        )
+        val expectedNotice = NoticeCreateRequest(
+            title = ("[정산] " + longTitle).take(50),
+            content = "정산명: $longTitle\n" +
+                "기본 1인당 금액: 10,000원\n" +
+                "입금 계좌: 국민은행 123456789012 (김모아)\n" +
+                "납부 기한: 2026-10-20 23:59\n" +
+                "개인별 실제 납부 금액은 정산 상세에서 확인해 주세요."
+        )
+
+        `when`(settlementRepository.save(any(Settlement::class.java))).thenReturn(settlement(41L, title = longTitle))
+        `when`(noticeService.createNotice(1L, 1L, expectedNotice))
+            .thenReturn(NoticeCreateResponse(noticeId = 13L, title = expectedNotice.title.orEmpty()))
+
+        When("createSettlement 메서드를 호출하면") {
+            val response = settlementService.createSettlement(1L, 1L, request)
+
+            Then("공지 제목은 앞 50자까지만 쓰고 공지 내용에는 정산명 전체가 들어간다") {
+                verify(noticeService).createNotice(1L, 1L, expectedNotice)
+                expectedNotice.title.orEmpty().length shouldBe 50
+                response.noticeId shouldBe 13L
             }
         }
     }
@@ -273,9 +350,140 @@ class SettlementServiceTests : BehaviorSpec({
 
                 val payments = response.payments.shouldNotBeNull()
                 payments.map { it.memberId } shouldBe listOf(1L, 5L, 9L)
-                payments[0].memberName.shouldBeNull()
+                payments[0].userName.shouldBeNull()
                 payments[0].submittedAt.toString() shouldBe "2026-10-15T20:00+09:00"
                 response.noticeId.shouldBeNull()
+            }
+        }
+    }
+
+    Given("정산 대상 구성원이 납부 완료를 제출할 때") {
+        `when`(settlementRepository.findByIdAndMeetingIdForUpdate(40L, 1L)).thenReturn(settlement(40L))
+
+        When("미납 상태이고 이전에 반려된 적이 있으면") {
+            val payment = SettlementMember(
+                id = 81L, settlementId = 40L, memberId = 1L, amount = 15000, rejectionReason = "입금 내역 없음"
+            )
+            `when`(settlementMemberRepository.findBySettlementIdAndMemberId(40L, 1L)).thenReturn(payment)
+            val response = settlementService.submitPayment(1L, 1L, 40L)
+
+            Then("확인 대기로 바뀌고 제출 일시가 기록되며 이전 반려 사유는 지워진다") {
+                payment.status shouldBe PaymentStatus.PENDING
+                payment.submittedAt.shouldNotBeNull()
+                payment.rejectionReason.shouldBeNull()
+                response.paymentId shouldBe 81L
+                response.status shouldBe PaymentStatus.PENDING
+            }
+        }
+
+        When("이미 확인 대기 상태이면") {
+            `when`(settlementMemberRepository.findBySettlementIdAndMemberId(40L, 1L)).thenReturn(
+                SettlementMember(id = 81L, settlementId = 40L, memberId = 1L, amount = 15000, status = PaymentStatus.PENDING)
+            )
+            val exception = shouldThrow<ApiException> { settlementService.submitPayment(1L, 1L, 40L) }
+
+            Then("CONFLICT 예외가 발생한다") {
+                exception.errorCode shouldBe ErrorCode.CONFLICT
+            }
+        }
+
+        When("정산 대상이 아니면") {
+            `when`(settlementMemberRepository.findBySettlementIdAndMemberId(40L, 1L)).thenReturn(null)
+            val exception = shouldThrow<ApiException> { settlementService.submitPayment(1L, 1L, 40L) }
+
+            Then("FORBIDDEN 예외가 발생한다") {
+                exception.errorCode shouldBe ErrorCode.FORBIDDEN
+            }
+        }
+    }
+
+    Given("관리자가 확인 대기 중인 납부를 승인할 때") {
+        fun pendingPayment() =
+            SettlementMember(id = 81L, settlementId = 40L, memberId = 1L, amount = 15000, status = PaymentStatus.PENDING)
+
+        When("다른 대상자가 아직 완납하지 않았으면") {
+            val settlement = settlement(40L)
+            val payment = pendingPayment()
+            `when`(settlementRepository.findByIdAndMeetingIdForUpdate(40L, 1L)).thenReturn(settlement)
+            `when`(settlementMemberRepository.findByIdAndSettlementId(81L, 40L)).thenReturn(payment)
+            `when`(settlementMemberRepository.findAllBySettlementIdOrderByIdAsc(40L)).thenReturn(
+                listOf(payment, SettlementMember(id = 82L, settlementId = 40L, memberId = 5L, amount = 15000))
+            )
+            val response = settlementService.approvePayment(1L, 1L, 40L, 81L)
+
+            Then("완납으로 바뀌고 승인 일시가 기록되며 정산은 진행 중으로 남는다") {
+                payment.status shouldBe PaymentStatus.PAID
+                payment.confirmedAt.shouldNotBeNull()
+                response.status shouldBe PaymentStatus.PAID
+                settlement.status shouldBe SettlementStatus.IN_PROGRESS
+            }
+        }
+
+        When("마지막 대상자까지 완납하면") {
+            val settlement = settlement(40L)
+            val payment = pendingPayment()
+            `when`(settlementRepository.findByIdAndMeetingIdForUpdate(40L, 1L)).thenReturn(settlement)
+            `when`(settlementMemberRepository.findByIdAndSettlementId(81L, 40L)).thenReturn(payment)
+            `when`(settlementMemberRepository.findAllBySettlementIdOrderByIdAsc(40L)).thenReturn(
+                listOf(
+                    payment,
+                    SettlementMember(id = 82L, settlementId = 40L, memberId = 5L, amount = 15000, status = PaymentStatus.PAID)
+                )
+            )
+            settlementService.approvePayment(1L, 1L, 40L, 81L)
+
+            Then("정산이 완료 상태가 된다") {
+                settlement.status shouldBe SettlementStatus.COMPLETED
+            }
+        }
+
+        When("확인 대기 상태가 아니면") {
+            `when`(settlementRepository.findByIdAndMeetingIdForUpdate(40L, 1L)).thenReturn(settlement(40L))
+            `when`(settlementMemberRepository.findByIdAndSettlementId(81L, 40L)).thenReturn(
+                SettlementMember(id = 81L, settlementId = 40L, memberId = 1L, amount = 15000)
+            )
+            val exception = shouldThrow<ApiException> { settlementService.approvePayment(1L, 1L, 40L, 81L) }
+
+            Then("CONFLICT 예외가 발생한다") {
+                exception.errorCode shouldBe ErrorCode.CONFLICT
+            }
+        }
+
+        When("다른 정산의 납부 항목이면") {
+            `when`(settlementRepository.findByIdAndMeetingIdForUpdate(40L, 1L)).thenReturn(settlement(40L))
+            `when`(settlementMemberRepository.findByIdAndSettlementId(999L, 40L)).thenReturn(null)
+            val exception = shouldThrow<ApiException> { settlementService.approvePayment(1L, 1L, 40L, 999L) }
+
+            Then("NOT_FOUND 예외가 발생한다") {
+                exception.errorCode shouldBe ErrorCode.NOT_FOUND
+            }
+        }
+    }
+
+    Given("관리자가 확인 대기 중인 납부를 반려할 때") {
+        `when`(settlementRepository.findByIdAndMeetingIdForUpdate(40L, 1L)).thenReturn(settlement(40L))
+
+        When("반려 사유를 함께 보내면") {
+            val payment = SettlementMember(id = 81L, settlementId = 40L, memberId = 1L, amount = 15000, status = PaymentStatus.PENDING)
+            `when`(settlementMemberRepository.findByIdAndSettlementId(81L, 40L)).thenReturn(payment)
+            val response = settlementService.rejectPayment(1L, 1L, 40L, 81L, "입금 내역을 확인할 수 없습니다.")
+
+            Then("미납으로 돌아가고 반려 사유가 저장된다") {
+                payment.status shouldBe PaymentStatus.UNPAID
+                payment.rejectionReason shouldBe "입금 내역을 확인할 수 없습니다."
+                response.status shouldBe PaymentStatus.UNPAID
+                response.rejectionReason shouldBe "입금 내역을 확인할 수 없습니다."
+            }
+        }
+
+        When("이미 완납된 납부면") {
+            `when`(settlementMemberRepository.findByIdAndSettlementId(81L, 40L)).thenReturn(
+                SettlementMember(id = 81L, settlementId = 40L, memberId = 1L, amount = 15000, status = PaymentStatus.PAID)
+            )
+            val exception = shouldThrow<ApiException> { settlementService.rejectPayment(1L, 1L, 40L, 81L, null) }
+
+            Then("CONFLICT 예외가 발생한다") {
+                exception.errorCode shouldBe ErrorCode.CONFLICT
             }
         }
     }

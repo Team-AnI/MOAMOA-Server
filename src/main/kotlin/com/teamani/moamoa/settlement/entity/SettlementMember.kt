@@ -51,4 +51,24 @@ class SettlementMember(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long? = null
-)
+) {
+
+    // 납부 완료 제출: 확인 대기로 바꾸고, 재제출이면 이전 반려 사유를 지움
+    fun submit(submittedAt: OffsetDateTime) {
+        status = PaymentStatus.PENDING
+        this.submittedAt = submittedAt
+        rejectionReason = null
+    }
+
+    // 관리자 승인: 완납 처리
+    fun approve(confirmedAt: OffsetDateTime) {
+        status = PaymentStatus.PAID
+        this.confirmedAt = confirmedAt
+    }
+
+    // 관리자 반려: 미납으로 되돌리고 사유만 남김
+    fun reject(reason: String?) {
+        status = PaymentStatus.UNPAID
+        rejectionReason = reason
+    }
+}

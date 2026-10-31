@@ -9,4 +9,10 @@ interface SettlementMemberRepository : JpaRepository<SettlementMember, Long> {
     fun findAllBySettlementIdIn(settlementIds: Collection<Long>): List<SettlementMember>
 
     fun findAllBySettlementIdOrderByIdAsc(settlementId: Long): List<SettlementMember>
+
+    // 본인 납부 항목 (없으면 정산 대상이 아님)
+    fun findBySettlementIdAndMemberId(settlementId: Long, memberId: Long): SettlementMember?
+
+    // 다른 정산의 납부 항목은 조회되지 않도록 정산 ID까지 함께 조건으로 사용
+    fun findByIdAndSettlementId(id: Long, settlementId: Long): SettlementMember?
 }

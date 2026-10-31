@@ -78,4 +78,10 @@ class Settlement(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long? = null
-)
+) {
+
+    // 대상자 전원이 완납하면 정산 완료
+    fun complete() {
+        status = SettlementStatus.COMPLETED
+    }
+}

@@ -1,0 +1,32 @@
+name: Convention Feedback
+
+on:
+  workflow_run:
+    workflows: [Metadata Validation]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  feedback:
+    if: github.event.workflow_run.event == 'pull_request' && (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
+    name: PR Convention Feedback
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    concurrency:
+      group: convention-feedback-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+    steps:
+      # workflow_run's github.sha belongs to the default branch, never the PR.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            await require('./.github/scripts/convention-check.cjs').run({ github, context, core });

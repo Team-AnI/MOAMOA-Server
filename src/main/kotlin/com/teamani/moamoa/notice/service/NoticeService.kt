@@ -12,6 +12,7 @@ import com.teamani.moamoa.notice.dto.NoticeUpdateRequest
 import com.teamani.moamoa.notice.dto.NoticeUpdateResponse
 import com.teamani.moamoa.notice.entity.Notice
 import com.teamani.moamoa.notice.repository.NoticeRepository
+import com.teamani.moamoa.settlement.repository.SettlementRepository
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
@@ -21,7 +22,8 @@ import kotlin.jvm.optionals.getOrNull
 
 @Service
 class NoticeService(
-    private val noticeRepository: NoticeRepository
+    private val noticeRepository: NoticeRepository,
+    private val settlementRepository: SettlementRepository
 ) {
 
     @Transactional
@@ -63,7 +65,8 @@ class NoticeService(
             .filter { it.meetingId == meetingId }
             .orElseThrow { ApiException(ErrorCode.NOT_FOUND, "공지사항을 찾을 수 없습니다.") }
 
-        // DB 삭제
+        // 안내 공지가 연결된 정산은 유지하고 연결만 해제한 뒤 삭제
+        settlementRepository.clearNoticeId(noticeId)
         noticeRepository.delete(notice)
 
         return NoticeDeleteResponse(noticeId = noticeId)

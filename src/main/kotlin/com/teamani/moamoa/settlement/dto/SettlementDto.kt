@@ -37,7 +37,10 @@ data class SettlementCreateRequest(
     val accountHolder: String?,
 
     @field:NotNull(message = "납부 기한은 필수입니다.")
-    val dueAt: OffsetDateTime?
+    val dueAt: OffsetDateTime?,
+
+    // 정산 안내 공지 자동 등록 여부 (보내지 않으면 false)
+    val postNotice: Boolean? = null
 )
 
 data class SettlementCreateResponse(
@@ -101,11 +104,35 @@ data class PaymentSummaryResponse(
     val paidAmount: Int
 )
 
+data class PaymentSubmitResponse(
+    val paymentId: Long,
+    val status: PaymentStatus,
+    val submittedAt: OffsetDateTime
+)
+
+data class PaymentApproveResponse(
+    val paymentId: Long,
+    val status: PaymentStatus,
+    val confirmedAt: OffsetDateTime
+)
+
+// 반려 사유는 선택 입력, 요청 본문 없이 반려해도 됨
+data class PaymentRejectRequest(
+    @field:Size(max = 255, message = "반려 사유는 255자 이하여야 합니다.")
+    val reason: String? = null
+)
+
+data class PaymentRejectResponse(
+    val paymentId: Long,
+    val status: PaymentStatus,
+    val rejectionReason: String?
+)
+
 data class PaymentResponse(
     val paymentId: Long,
     val memberId: Long,
     // User 도메인 연동 전까지 null
-    val memberName: String?,
+    val userName: String?,
     val amount: Int,
     val status: PaymentStatus,
     val submittedAt: OffsetDateTime?

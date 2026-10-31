@@ -11,7 +11,7 @@ import jakarta.persistence.Table
 import java.time.OffsetDateTime
 
 @Entity
-@Table(name = "schedules")
+@Table(name = "schedule")
 class Schedule(
     // 일정이 속한 모임 ID
     @Column(nullable = false)

@@ -9,7 +9,7 @@ import jakarta.persistence.Table
 import java.time.OffsetDateTime
 
 @Entity
-@Table(name = "notices")
+@Table(name = "notice")
 class Notice(
     // 공지가 속한 모임 ID
     @Column(nullable = false)

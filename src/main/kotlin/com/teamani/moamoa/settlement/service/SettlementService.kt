@@ -2,8 +2,13 @@ package com.teamani.moamoa.settlement.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.notice.dto.NoticeCreateRequest
+import com.teamani.moamoa.notice.service.NoticeService
 import com.teamani.moamoa.settlement.dto.MyPaymentResponse
+import com.teamani.moamoa.settlement.dto.PaymentApproveResponse
+import com.teamani.moamoa.settlement.dto.PaymentRejectResponse
 import com.teamani.moamoa.settlement.dto.PaymentResponse
+import com.teamani.moamoa.settlement.dto.PaymentSubmitResponse
 import com.teamani.moamoa.settlement.dto.PaymentSummaryResponse
 import com.teamani.moamoa.settlement.dto.SettlementCreateRequest
 import com.teamani.moamoa.settlement.dto.SettlementCreateResponse
@@ -17,12 +22,16 @@ import com.teamani.moamoa.settlement.repository.SettlementMemberRepository
 import com.teamani.moamoa.settlement.repository.SettlementRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Service
 class SettlementService(
     private val settlementRepository: SettlementRepository,
-    private val settlementMemberRepository: SettlementMemberRepository
+    private val settlementMemberRepository: SettlementMemberRepository,
+    private val noticeService: NoticeService
 ) {
 
     @Transactional
@@ -67,6 +76,16 @@ class SettlementService(
         settlementMemberRepository.saveAll(
             memberIds.map { SettlementMember(settlementId = settlementId, memberId = it, amount = amounts.getValue(it)) }
         )
+
+        // 공지 생성에 실패하면 같은 트랜잭션이라 정산도 함께 롤백됨
+        if (request.postNotice == true) {
+            val notice = noticeService.createNotice(
+                meetingId,
+                memberId,
+                settlementNotice(settlement, totalAmount / memberIds.size)
+            )
+            settlement.noticeId = notice.noticeId
+        }
 
         // TODO: 푸시 알림 - 정산 대상 구성원에게 정산 요청 알림 발송
 
@@ -152,11 +171,98 @@ class SettlementService(
         )
     }
 
+    @Transactional
+    fun submitPayment(meetingId: Long, memberId: Long, settlementId: Long): PaymentSubmitResponse {
+        validateMeeting(meetingId)
+        validateMember(meetingId, memberId)
+
+        lockSettlement(meetingId, settlementId)
+        val payment = settlementMemberRepository.findBySettlementIdAndMemberId(settlementId, memberId)
+            ?: throw ApiException(ErrorCode.FORBIDDEN, "정산 대상 구성원만 납부 완료를 제출할 수 있습니다.")
+        if (payment.status != PaymentStatus.UNPAID) {
+            throw ApiException(ErrorCode.CONFLICT, "이미 납부 완료를 제출했거나 완납한 정산입니다.")
+        }
+
+        // 변경 감지(Dirty Checking)로 트랜잭션 종료 시 반영
+        val submittedAt = OffsetDateTime.now()
+        payment.submit(submittedAt)
+
+        return PaymentSubmitResponse(
+            paymentId = checkNotNull(payment.id) { "납부 항목 식별자가 없습니다." },
+            status = payment.status,
+            submittedAt = submittedAt.withOffsetSameInstant(KST)
+        )
+    }
+
+    @Transactional
+    fun approvePayment(meetingId: Long, memberId: Long, settlementId: Long, paymentId: Long): PaymentApproveResponse {
+        validateMeeting(meetingId)
+        validateAdmin(meetingId, memberId)
+
+        val settlement = lockSettlement(meetingId, settlementId)
+        val payment = findPendingPayment(settlementId, paymentId, "확인 대기 상태의 납부만 승인할 수 있습니다.")
+
+        val confirmedAt = OffsetDateTime.now()
+        payment.approve(confirmedAt)
+
+        // 대상자 전원이 완납하면 정산 완료
+        val payments = settlementMemberRepository.findAllBySettlementIdOrderByIdAsc(settlementId)
+        if (payments.all { it.status == PaymentStatus.PAID }) {
+            settlement.complete()
+        }
+
+        return PaymentApproveResponse(
+            paymentId = paymentId,
+            status = payment.status,
+            confirmedAt = confirmedAt.withOffsetSameInstant(KST)
+        )
+    }
+
+    @Transactional
+    fun rejectPayment(
+        meetingId: Long,
+        memberId: Long,
+        settlementId: Long,
+        paymentId: Long,
+        reason: String?
+    ): PaymentRejectResponse {
+        validateMeeting(meetingId)
+        validateAdmin(meetingId, memberId)
+
+        lockSettlement(meetingId, settlementId)
+        val payment = findPendingPayment(settlementId, paymentId, "확인 대기 상태의 납부만 반려할 수 있습니다.")
+
+        payment.reject(reason)
+
+        // TODO: 푸시 알림 - 해당 구성원에게 반려 안내 알림 발송
+
+        return PaymentRejectResponse(
+            paymentId = paymentId,
+            status = payment.status,
+            rejectionReason = payment.rejectionReason
+        )
+    }
+
+    // 납부 상태를 확인하기 전에 정산을 잠가, 먼저 끝난 요청의 결과를 보고 판단하도록 함 (동시 승인·중복 처리 방지)
+    private fun lockSettlement(meetingId: Long, settlementId: Long): Settlement =
+        settlementRepository.findByIdAndMeetingIdForUpdate(settlementId, meetingId)
+            ?: throw ApiException(ErrorCode.NOT_FOUND, "정산을 찾을 수 없습니다.")
+
+    // 승인·반려는 확인 대기(PENDING) 상태의 납부 항목만 가능
+    private fun findPendingPayment(settlementId: Long, paymentId: Long, conflictMessage: String): SettlementMember {
+        val payment = settlementMemberRepository.findByIdAndSettlementId(paymentId, settlementId)
+            ?: throw ApiException(ErrorCode.NOT_FOUND, "납부 항목을 찾을 수 없습니다.")
+        if (payment.status != PaymentStatus.PENDING) {
+            throw ApiException(ErrorCode.CONFLICT, conflictMessage)
+        }
+        return payment
+    }
+
     private fun toPaymentResponse(payment: SettlementMember): PaymentResponse =
         PaymentResponse(
             paymentId = checkNotNull(payment.id) { "납부 항목 식별자가 없습니다." },
             memberId = payment.memberId,
-            memberName = null, // TODO: User 도메인 연동 시 app_user.name으로 채움
+            userName = null, // TODO: User 도메인 연동 시 app_user.name으로 채움
             amount = payment.amount,
             status = payment.status,
             submittedAt = payment.submittedAt?.withOffsetSameInstant(KST)
@@ -193,9 +299,21 @@ class SettlementService(
         // TODO: scheduleId가 있는데 해당 모임의 일정이 아니면 404 NOT_FOUND
     }
 
+    // 정산 안내 공지: 제목은 공지 제목 최대 길이를 넘으면 잘라 쓰고, 내용에는 정산명 전체를 담음
+    private fun settlementNotice(settlement: Settlement, amountPerMember: Int) = NoticeCreateRequest(
+        title = "[정산] ${settlement.title}".take(NOTICE_TITLE_MAX_LENGTH),
+        content = "정산명: ${settlement.title}\n" +
+            "기본 1인당 금액: ${"%,d".format(Locale.KOREA, amountPerMember)}원\n" +
+            "입금 계좌: ${settlement.bankName} ${settlement.accountNumber} (${settlement.accountHolder})\n" +
+            "납부 기한: ${settlement.dueAt.withOffsetSameInstant(KST).format(NOTICE_DUE_AT_FORMAT)}\n" +
+            "개인별 실제 납부 금액은 정산 상세에서 확인해 주세요."
+    )
+
     companion object {
         // API 명세상 응답 일시는 KST(+09:00)
         private val KST: ZoneOffset = ZoneOffset.ofHours(9)
+        private const val NOTICE_TITLE_MAX_LENGTH = 50
+        private val NOTICE_DUE_AT_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
     }
 }
 
