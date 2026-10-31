@@ -1,5 +1,6 @@
 package com.teamani.moamoa.member.service
 
+import com.teamani.moamoa.attendance.repository.AttendanceRepository
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.meeting.repository.MeetingRepository
@@ -26,7 +27,8 @@ class MemberServiceTests : BehaviorSpec({
     val meetingRepository: MeetingRepository = mock(MeetingRepository::class.java)
     val memberRepository: MemberRepository = mock(MemberRepository::class.java)
     val voteRepository: VoteRepository = mock(VoteRepository::class.java)
-    val memberService = MemberService(meetingRepository, memberRepository, voteRepository)
+    val attendanceRepository: AttendanceRepository = mock(AttendanceRepository::class.java)
+    val memberService = MemberService(meetingRepository, memberRepository, voteRepository, attendanceRepository)
 
     val meetingId = 1L
     val adminUserId = 10L
@@ -36,7 +38,7 @@ class MemberServiceTests : BehaviorSpec({
     val member = Member(meetingId = meetingId, userId = memberUserId, role = MemberRole.MEMBER, id = 200L)
 
     beforeTest {
-        reset(meetingRepository, memberRepository, voteRepository)
+        reset(meetingRepository, memberRepository, voteRepository, attendanceRepository)
         `when`(meetingRepository.existsByIdAndEndedAtIsNull(meetingId)).thenReturn(true)
         `when`(memberRepository.findByMeetingIdAndUserId(meetingId, adminUserId)).thenReturn(admin)
         `when`(memberRepository.findByMeetingIdAndUserId(meetingId, memberUserId)).thenReturn(member)
@@ -100,21 +102,23 @@ class MemberServiceTests : BehaviorSpec({
 
     Given("모임을 탈퇴할 때") {
         When("MEMBER가 요청하면") {
-            Then("투표 응답을 먼저 삭제한 뒤 구성원 정보를 삭제하고 meetingId를 반환한다") {
+            Then("투표 응답과 출석 기록을 먼저 삭제한 뒤 구성원 정보를 삭제하고 meetingId를 반환한다") {
                 val response = memberService.leaveMeeting(meetingId, memberUserId)
 
                 response.meetingId shouldBe meetingId
-                val order = inOrder(voteRepository, memberRepository)
+                val order = inOrder(voteRepository, attendanceRepository, memberRepository)
                 order.verify(voteRepository).deleteAllByMemberId(200L)
+                order.verify(attendanceRepository).deleteAllByMemberId(200L)
                 order.verify(memberRepository).delete(member)
             }
         }
         When("ADMIN이 요청하면") {
-            Then("422 UNPROCESSABLE_ENTITY 예외가 발생하고 구성원 정보와 투표 응답은 유지된다") {
+            Then("422 UNPROCESSABLE_ENTITY 예외가 발생하고 구성원 정보와 투표 응답·출석 기록은 유지된다") {
                 shouldThrow<ApiException> {
                     memberService.leaveMeeting(meetingId, adminUserId)
                 }.errorCode shouldBe ErrorCode.UNPROCESSABLE_ENTITY
                 verify(voteRepository, never()).deleteAllByMemberId(anyLong())
+                verify(attendanceRepository, never()).deleteAllByMemberId(anyLong())
                 verify(memberRepository, never()).delete(any(Member::class.java))
             }
         }

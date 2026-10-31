@@ -1,5 +1,6 @@
 package com.teamani.moamoa.meeting.service
 
+import com.teamani.moamoa.attendance.repository.AttendanceRepository
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.meeting.dto.MeetingCreateRequest
@@ -40,7 +41,12 @@ class MeetingServiceTests : BehaviorSpec({
 
     val meetingRepository: MeetingRepository = mock(MeetingRepository::class.java)
     val memberRepository: MemberRepository = mock(MemberRepository::class.java)
-    val memberService = MemberService(meetingRepository, memberRepository, mock(VoteRepository::class.java))
+    val memberService = MemberService(
+        meetingRepository,
+        memberRepository,
+        mock(VoteRepository::class.java),
+        mock(AttendanceRepository::class.java)
+    )
     val meetingService = MeetingService(meetingRepository, memberRepository, memberService)
 
     val meetingId = 1L
