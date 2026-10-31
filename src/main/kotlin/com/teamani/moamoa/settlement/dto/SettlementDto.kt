@@ -132,7 +132,7 @@ data class PaymentResponse(
     val paymentId: Long,
     val memberId: Long,
     // User 도메인 연동 전까지 null
-    val memberName: String?,
+    val userName: String?,
     val amount: Int,
     val status: PaymentStatus,
     val submittedAt: OffsetDateTime?

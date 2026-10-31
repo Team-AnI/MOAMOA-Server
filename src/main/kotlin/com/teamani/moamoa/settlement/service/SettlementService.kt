@@ -262,7 +262,7 @@ class SettlementService(
         PaymentResponse(
             paymentId = checkNotNull(payment.id) { "납부 항목 식별자가 없습니다." },
             memberId = payment.memberId,
-            memberName = null, // TODO: User 도메인 연동 시 app_user.name으로 채움
+            userName = null, // TODO: User 도메인 연동 시 app_user.name으로 채움
             amount = payment.amount,
             status = payment.status,
             submittedAt = payment.submittedAt?.withOffsetSameInstant(KST)

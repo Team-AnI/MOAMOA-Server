@@ -350,7 +350,7 @@ class SettlementServiceTests : BehaviorSpec({
 
                 val payments = response.payments.shouldNotBeNull()
                 payments.map { it.memberId } shouldBe listOf(1L, 5L, 9L)
-                payments[0].memberName.shouldBeNull()
+                payments[0].userName.shouldBeNull()
                 payments[0].submittedAt.toString() shouldBe "2026-10-15T20:00+09:00"
                 response.noticeId.shouldBeNull()
             }
