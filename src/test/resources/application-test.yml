@@ -6,3 +6,7 @@ spring:
 
 jwt:
   secret: test-only-secret-key-for-moamoa-jwt-0123456789
+
+moamoa:
+  cors:
+    allowed-origins: https://allowed.example.com

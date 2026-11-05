@@ -77,14 +77,15 @@ jobs:
           PROD_DB_USERNAME: ${{ vars.PROD_DB_USERNAME }}
           PROD_DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
           PROD_JWT_SECRET: ${{ secrets.PROD_JWT_SECRET }}
+          PROD_CORS_ALLOWED_ORIGINS: ${{ vars.PROD_CORS_ALLOWED_ORIGINS }}
         run: |
-          for name in EC2_HOST EC2_USERNAME EC2_SSH_KEY EC2_KNOWN_HOSTS DOCKERHUB_USERNAME PROD_DB_NAME PROD_DB_USERNAME PROD_DB_PASSWORD PROD_JWT_SECRET; do
+          for name in EC2_HOST EC2_USERNAME EC2_SSH_KEY EC2_KNOWN_HOSTS DOCKERHUB_USERNAME PROD_DB_NAME PROD_DB_USERNAME PROD_DB_PASSWORD PROD_JWT_SECRET PROD_CORS_ALLOWED_ORIGINS; do
             if [ -z "${!name}" ]; then
               echo "::error::Required setting is missing: $name"
               exit 1
             fi
           done
-          for name in DOCKERHUB_USERNAME PROD_DB_NAME PROD_DB_USERNAME PROD_DB_PASSWORD PROD_JWT_SECRET; do
+          for name in DOCKERHUB_USERNAME PROD_DB_NAME PROD_DB_USERNAME PROD_DB_PASSWORD PROD_JWT_SECRET PROD_CORS_ALLOWED_ORIGINS; do
             case "${!name}" in
               *"'"* | *$'\n'* | *$'\r'*)
                 echo "::error::$name must not contain single quotes or line breaks"
@@ -99,6 +100,7 @@ jobs:
             printf "DB_USERNAME='%s'\n" "$PROD_DB_USERNAME"
             printf "DB_PASSWORD='%s'\n" "$PROD_DB_PASSWORD"
             printf "JWT_SECRET='%s'\n" "$PROD_JWT_SECRET"
+            printf "CORS_ALLOWED_ORIGINS='%s'\n" "$PROD_CORS_ALLOWED_ORIGINS"
           } > runtime.env
 
       - name: Set up SSH key

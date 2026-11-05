@@ -99,6 +99,7 @@ Copy-Item .env.example .env
 | `DB_USERNAME` | DB 사용자 이름 | `postgres` |
 | `DB_PASSWORD` | DB 비밀번호 | 실제 DB 비밀번호 |
 | `JWT_SECRET` | JWT 서명 키 (32바이트 이상) | 임의의 긴 문자열 |
+| `CORS_ALLOWED_ORIGINS` | CORS 허용 웹 프론트엔드 Origin (쉼표로 구분, 선택) | `http://localhost:3000` |
 
 `application.yml`은 실행 작업 디렉터리의 `.env`를 Java Properties 형식으로 읽습니다. 저장소 루트에서 실행하고, IntelliJ 실행 설정의 Working directory도 저장소 루트로 지정합니다.
 
@@ -109,6 +110,8 @@ Copy-Item .env.example .env
 - DB·JWT 설정에 기본값은 없습니다. `.env` 파일 자체는 선택 사항이지만, 서버 실행 시 네 변수는 모두 제공해야 합니다.
 - `JWT_SECRET`이 32바이트보다 짧으면 서버가 시작되지 않습니다. PC마다 임의 문자열을 만들어 각자의 `.env`에 넣고, 다른 사람과 공유하지 않습니다.
 - 운영 서버의 `JWT_SECRET`은 GitHub `production` Environment secret `PROD_JWT_SECRET`으로 관리하며, 배포 워크플로가 `JWT_SECRET`으로 전달합니다.
+- `CORS_ALLOWED_ORIGINS`는 브라우저에서 다른 도메인의 웹 프론트엔드가 API를 호출할 때만 필요합니다. 비워 두면 허용 Origin이 없어 브라우저의 교차 출처 요청은 거부되고, 앱과 Swagger UI는 영향이 없습니다.
+- 운영 서버의 `CORS_ALLOWED_ORIGINS`는 GitHub `production` Environment variable `PROD_CORS_ALLOWED_ORIGINS`로 관리하며, 값이 없으면 배포가 중단됩니다.
 - `./gradlew test`는 테스트 전용 H2 설정을 사용하므로 `.env`와 PostgreSQL 서버 없이 실행할 수 있습니다.
 
 ### 2. 작업 흐름
