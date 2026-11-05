@@ -10,4 +10,7 @@ interface RegularDuesRepository : JpaRepository<RegularDues, Long> {
 
     // 다른 모임의 정기 회비는 조회되지 않도록 모임 ID까지 함께 조건으로 사용
     fun findByIdAndMeetingId(id: Long, meetingId: Long): RegularDues?
+
+    // 자동 청구 대상 (비활성화한 정기 회비는 제외)
+    fun findAllByIsActiveTrue(): List<RegularDues>
 }
