@@ -1,5 +1,6 @@
 package com.teamani.moamoa.schedule.service
 
+import com.teamani.moamoa.attendance.repository.AttendanceRepository
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.schedule.dto.ScheduleCreateRequest
@@ -11,6 +12,8 @@ import com.teamani.moamoa.schedule.dto.ScheduleSummaryResponse
 import com.teamani.moamoa.schedule.dto.ScheduleUpdateRequest
 import com.teamani.moamoa.schedule.entity.Schedule
 import com.teamani.moamoa.schedule.repository.ScheduleRepository
+import com.teamani.moamoa.settlement.repository.SettlementRepository
+import com.teamani.moamoa.vote.repository.VoteRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
@@ -19,7 +22,10 @@ import java.time.ZoneOffset
 
 @Service
 class ScheduleService(
-    private val scheduleRepository: ScheduleRepository
+    private val scheduleRepository: ScheduleRepository,
+    private val attendanceRepository: AttendanceRepository,
+    private val voteRepository: VoteRepository,
+    private val settlementRepository: SettlementRepository
 ) {
 
     @Transactional
@@ -134,9 +140,14 @@ class ScheduleService(
         validateMeeting(meetingId)
         validateAdmin(meetingId, userId)
 
-        val schedule = scheduleRepository.findByIdAndMeetingId(scheduleId, meetingId)
+        // 투표 제출·확정과 같은 일정 잠금으로 조회해, 처리 중인 투표 응답이 삭제 뒤에 남지 않게 함
+        val schedule = scheduleRepository.findByIdAndMeetingIdForUpdate(scheduleId, meetingId)
             ?: throw ApiException(ErrorCode.NOT_FOUND, "일정을 찾을 수 없습니다.")
 
+        // 같은 트랜잭션에서 연결 기록을 먼저 정리 (출석·투표는 삭제, 정산은 납부 기록이라 연결만 해제)
+        attendanceRepository.deleteAllByScheduleId(scheduleId)
+        voteRepository.deleteAllByScheduleId(scheduleId)
+        settlementRepository.clearScheduleId(scheduleId)
         scheduleRepository.delete(schedule)
 
         return ScheduleDeleteResponse(scheduleId = scheduleId)

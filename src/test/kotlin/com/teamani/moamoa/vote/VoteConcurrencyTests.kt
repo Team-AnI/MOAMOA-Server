@@ -10,6 +10,7 @@ import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.schedule.entity.Schedule
 import com.teamani.moamoa.schedule.entity.ScheduleStatus
 import com.teamani.moamoa.schedule.repository.ScheduleRepository
+import com.teamani.moamoa.schedule.service.ScheduleService
 import com.teamani.moamoa.vote.dto.MyVoteSubmitRequest
 import com.teamani.moamoa.vote.dto.VoteConfirmRequest
 import com.teamani.moamoa.vote.entity.Vote
@@ -41,7 +42,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
-// 실제 트랜잭션·DB에서 같은 일정의 투표 제출·확정이 동시에 들어올 때 일정 단위로 순서대로 처리되는지 검증
+// 실제 트랜잭션·DB에서 같은 일정의 투표 제출·확정·일정 삭제가 동시에 들어올 때 일정 단위로 순서대로 처리되는지 검증
 @SpringBootTest
 @ActiveProfiles("test")
 class VoteConcurrencyTests : BehaviorSpec() {
@@ -50,6 +51,9 @@ class VoteConcurrencyTests : BehaviorSpec() {
 
     @Autowired
     lateinit var voteService: VoteService
+
+    @Autowired
+    lateinit var scheduleService: ScheduleService
 
     @Autowired
     lateinit var meetingRepository: MeetingRepository
@@ -156,6 +160,38 @@ class VoteConcurrencyTests : BehaviorSpec() {
                     reset(voteRepository)
                     scheduleOf(vote).status shouldBe ScheduleStatus.CONFIRMED
                     respondedRows(vote).size shouldBe 0
+                }
+            }
+
+            When("투표 제출이 상태 검사를 통과한 직후 일정 삭제가 들어오면") {
+                Then("삭제는 제출이 끝날 때까지 기다린 뒤 처리되고, 제출한 응답까지 함께 삭제되어 남지 않는다") {
+                    val vote = savedVote("RACE0105")
+                    // 제출이 일정을 잠그고 기존 응답을 지우기 직전에 멈춤
+                    val pause = Pause()
+                    doAnswer(beforeReal(pause::hold)).`when`(voteRepository).deleteAllByScheduleIdAndMemberId(anyLong(), anyLong())
+                    val submitRequest = MyVoteSubmitRequest(listOf(firstTime))
+                    val executor = Executors.newFixedThreadPool(2)
+
+                    try {
+                        val submit = executor.start {
+                            voteService.submitMyVote(vote.meetingId, MEMBER_USER_ID, vote.scheduleId, submitRequest)
+                        }
+                        pause.awaitPaused()
+                        val delete = executor.start {
+                            scheduleService.deleteSchedule(vote.meetingId, ADMIN_USER_ID, vote.scheduleId)
+                        }
+
+                        shouldThrow<TimeoutException> { delete.get(WAIT_MILLIS, TimeUnit.MILLISECONDS) }
+                        pause.release()
+
+                        submit.get(10, TimeUnit.SECONDS).shouldBeNull()
+                        delete.get(10, TimeUnit.SECONDS).shouldBeNull()
+                    } finally {
+                        pause.release()
+                        executor.shutdownNow()
+                    }
+                    scheduleRepository.findById(vote.scheduleId).isPresent shouldBe false
+                    voteRepository.findAllByScheduleId(vote.scheduleId) shouldBe emptyList()
                 }
             }
 

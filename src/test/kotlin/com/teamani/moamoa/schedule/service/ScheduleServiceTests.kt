@@ -1,5 +1,6 @@
 package com.teamani.moamoa.schedule.service
 
+import com.teamani.moamoa.attendance.repository.AttendanceRepository
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.schedule.dto.ScheduleCreateRequest
@@ -7,14 +8,18 @@ import com.teamani.moamoa.schedule.dto.ScheduleUpdateRequest
 import com.teamani.moamoa.schedule.entity.Schedule
 import com.teamani.moamoa.schedule.entity.ScheduleStatus
 import com.teamani.moamoa.schedule.repository.ScheduleRepository
+import com.teamani.moamoa.settlement.repository.SettlementRepository
+import com.teamani.moamoa.vote.repository.VoteRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.mockito.ArgumentMatchers.any
+import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.Mockito.`when`
 import org.mockito.Mockito.clearInvocations
+import org.mockito.Mockito.inOrder
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
@@ -26,9 +31,12 @@ import java.util.Optional
 class ScheduleServiceTests : BehaviorSpec({
 
     val scheduleRepository: ScheduleRepository = mock(ScheduleRepository::class.java)
-    val scheduleService = ScheduleService(scheduleRepository)
+    val attendanceRepository: AttendanceRepository = mock(AttendanceRepository::class.java)
+    val voteRepository: VoteRepository = mock(VoteRepository::class.java)
+    val settlementRepository: SettlementRepository = mock(SettlementRepository::class.java)
+    val scheduleService = ScheduleService(scheduleRepository, attendanceRepository, voteRepository, settlementRepository)
 
-    afterEach { clearInvocations(scheduleRepository) }
+    afterEach { clearInvocations(scheduleRepository, attendanceRepository, voteRepository, settlementRepository) }
 
     Given("모임 일정 생성 요청 데이터가 주어졌을 때") {
         val meetingId = 1L
@@ -365,14 +373,18 @@ class ScheduleServiceTests : BehaviorSpec({
             startsAt = OffsetDateTime.parse("2026-10-11T07:00:00+09:00")
         )
 
-        `when`(scheduleRepository.findByIdAndMeetingId(scheduleId, meetingId)).thenReturn(schedule)
+        `when`(scheduleRepository.findByIdAndMeetingIdForUpdate(scheduleId, meetingId)).thenReturn(schedule)
 
         When("deleteSchedule 메서드를 호출하면") {
             val response = scheduleService.deleteSchedule(meetingId, 1L, scheduleId)
 
-            Then("일정이 삭제되고 삭제된 일정 ID가 반환된다") {
+            Then("출석·투표 삭제와 정산 연결 해제 후 일정이 삭제되고 삭제된 일정 ID가 반환된다") {
                 response.scheduleId shouldBe 20L
-                verify(scheduleRepository).delete(schedule)
+                val order = inOrder(attendanceRepository, voteRepository, settlementRepository, scheduleRepository)
+                order.verify(attendanceRepository).deleteAllByScheduleId(scheduleId)
+                order.verify(voteRepository).deleteAllByScheduleId(scheduleId)
+                order.verify(settlementRepository).clearScheduleId(scheduleId)
+                order.verify(scheduleRepository).delete(schedule)
             }
         }
     }
@@ -386,6 +398,9 @@ class ScheduleServiceTests : BehaviorSpec({
             Then("NOT_FOUND 예외가 발생하고 아무것도 삭제하지 않는다") {
                 exception.errorCode shouldBe ErrorCode.NOT_FOUND
                 verify(scheduleRepository, never()).delete(any(Schedule::class.java))
+                verify(attendanceRepository, never()).deleteAllByScheduleId(anyLong())
+                verify(voteRepository, never()).deleteAllByScheduleId(anyLong())
+                verify(settlementRepository, never()).clearScheduleId(anyLong())
             }
         }
     }

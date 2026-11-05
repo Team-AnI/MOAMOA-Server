@@ -31,4 +31,9 @@ interface SettlementRepository : JpaRepository<Settlement, Long> {
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("update Settlement s set s.regularDuesId = null where s.regularDuesId = :regularDuesId")
     fun clearRegularDuesId(regularDuesId: Long): Int
+
+    // 일정 삭제 전 연결된 정산과의 연결만 해제 (정산·납부 내역은 유지, 영속성 컨텍스트 동기화는 위와 같음)
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update Settlement s set s.scheduleId = null where s.scheduleId = :scheduleId")
+    fun clearScheduleId(scheduleId: Long): Int
 }
