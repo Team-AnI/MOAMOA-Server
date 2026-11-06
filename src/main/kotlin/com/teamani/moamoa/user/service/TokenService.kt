@@ -1,6 +1,8 @@
 package com.teamani.moamoa.user.service
 
 import com.teamani.moamoa.global.auth.JwtTokenProvider
+import com.teamani.moamoa.global.exception.ApiException
+import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.user.entity.RefreshToken
 import com.teamani.moamoa.user.repository.RefreshTokenRepository
 import org.springframework.stereotype.Service
@@ -25,6 +27,8 @@ class TokenService(
     // 리프레시 토큰은 해시만 저장하고 원문은 응답으로만 전달
     @Transactional
     fun issueTokens(userId: Long): IssuedTokens {
+        deleteOldestTokensOverLimit(userId)
+
         val refreshToken = generateRefreshToken()
 
         refreshTokenRepository.save(
@@ -41,6 +45,39 @@ class TokenService(
         )
     }
 
+    // 기존 토큰을 삭제하고 새 토큰으로 교체 (이미 사용했거나 만료된 토큰은 401)
+    @Transactional
+    fun reissueTokens(refreshToken: String): IssuedTokens {
+        val tokenHash = sha256(refreshToken)
+        val token = refreshTokenRepository.findByTokenHash(tokenHash)
+            ?: throw ApiException(ErrorCode.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE)
+        if (token.expiresAt.isBefore(OffsetDateTime.now())) {
+            throw ApiException(ErrorCode.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE)
+        }
+
+        // 같은 토큰의 동시 요청은 삭제에 성공한 한 요청만 재발급
+        if (refreshTokenRepository.deleteByTokenHash(tokenHash) == 0) {
+            throw ApiException(ErrorCode.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE)
+        }
+
+        return issueTokens(token.userId)
+    }
+
+    // 이미 삭제된 토큰이어도 예외 없이 처리
+    @Transactional
+    fun revokeToken(refreshToken: String) {
+        refreshTokenRepository.deleteByTokenHash(sha256(refreshToken))
+    }
+
+    // 새 토큰을 넣어도 최대 기기 수를 넘지 않도록 가장 오래된 토큰부터 삭제
+    private fun deleteOldestTokensOverLimit(userId: Long) {
+        val tokens = refreshTokenRepository.findAllByUserIdOrderByCreatedAtAscIdAsc(userId)
+        val overLimit = tokens.size - MAX_DEVICES + 1
+        if (overLimit > 0) {
+            refreshTokenRepository.deleteAllByIdInBatch(tokens.take(overLimit).mapNotNull { it.id })
+        }
+    }
+
     private fun generateRefreshToken(): String {
         val bytes = ByteArray(REFRESH_TOKEN_BYTES)
         secureRandom.nextBytes(bytes)
@@ -50,6 +87,8 @@ class TokenService(
     companion object {
         private const val REFRESH_TOKEN_DAYS = 30L
         private const val REFRESH_TOKEN_BYTES = 32
+        private const val MAX_DEVICES = 3
+        private const val INVALID_REFRESH_TOKEN_MESSAGE = "리프레시 토큰이 유효하지 않습니다."
         private val secureRandom = SecureRandom()
     }
 }
