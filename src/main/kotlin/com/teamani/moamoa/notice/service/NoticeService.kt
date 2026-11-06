@@ -2,17 +2,27 @@ package com.teamani.moamoa.notice.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
 import com.teamani.moamoa.notice.dto.NoticeDetailResponse
 import com.teamani.moamoa.notice.dto.NoticeListResponse
+import com.teamani.moamoa.notice.dto.NoticeReadMemberResponse
+import com.teamani.moamoa.notice.dto.NoticeReadResponse
+import com.teamani.moamoa.notice.dto.NoticeReadStatusResponse
 import com.teamani.moamoa.notice.dto.NoticeSummaryResponse
+import com.teamani.moamoa.notice.dto.NoticeUnreadMemberResponse
 import com.teamani.moamoa.notice.dto.NoticeUpdateRequest
 import com.teamani.moamoa.notice.dto.NoticeUpdateResponse
 import com.teamani.moamoa.notice.entity.Notice
+import com.teamani.moamoa.notice.entity.NoticeRead
+import com.teamani.moamoa.notice.repository.NoticeReadRepository
 import com.teamani.moamoa.notice.repository.NoticeRepository
 import com.teamani.moamoa.settlement.repository.SettlementRepository
+import com.teamani.moamoa.user.entity.ProfileColor
+import com.teamani.moamoa.user.repository.AppUserRepository
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
@@ -23,7 +33,11 @@ import kotlin.jvm.optionals.getOrNull
 @Service
 class NoticeService(
     private val noticeRepository: NoticeRepository,
-    private val settlementRepository: SettlementRepository
+    private val settlementRepository: SettlementRepository,
+    private val noticeReadRepository: NoticeReadRepository,
+    private val memberService: MemberService,
+    private val memberRepository: MemberRepository,
+    private val appUserRepository: AppUserRepository
 ) {
 
     @Transactional
@@ -41,10 +55,14 @@ class NoticeService(
 
         // DB 영구 저장
         val savedNotice = noticeRepository.save(notice)
+        val noticeId = checkNotNull(savedNotice.id) { "공지 식별자가 생성되지 않았습니다." }
+
+        // 작성자는 작성할 때 읽음으로 기록 (정산·정기 회비 안내 공지 포함)
+        noticeReadRepository.save(NoticeRead(noticeId = noticeId, memberId = savedNotice.membersId, readAt = savedNotice.createdAt))
 
         // 성공 응답 DTO 반환
         return NoticeCreateResponse(
-            noticeId = checkNotNull(savedNotice.id) { "공지 식별자가 생성되지 않았습니다." },
+            noticeId = noticeId,
             title = savedNotice.title
         )
     }
@@ -65,8 +83,9 @@ class NoticeService(
             .filter { it.meetingId == meetingId }
             .orElseThrow { ApiException(ErrorCode.NOT_FOUND, "공지사항을 찾을 수 없습니다.") }
 
-        // 안내 공지가 연결된 정산은 유지하고 연결만 해제한 뒤 삭제
+        // 안내 공지가 연결된 정산은 유지하고 연결만 해제, 읽음 기록은 함께 삭제한 뒤 공지 삭제
         settlementRepository.clearNoticeId(noticeId)
+        noticeReadRepository.deleteAllByNoticeId(noticeId)
         noticeRepository.delete(notice)
 
         return NoticeDeleteResponse(noticeId = noticeId)
@@ -81,6 +100,7 @@ class NoticeService(
             noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." },
             title = notice.title,
             content = notice.content,
+            settlementId = settlementRepository.findFirstByNoticeId(noticeId)?.id,
             createdAt = notice.createdAt.withOffsetSameInstant(KST)
         )
     }
@@ -95,10 +115,22 @@ class NoticeService(
         val pageable = PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))
         val noticePage = noticeRepository.findAllByMeetingId(meetingId, pageable)
 
+        // 공지마다 집계 쿼리가 반복되지 않도록 페이지의 공지 읽음 수를 한 번에 조회
+        val noticeIds = noticePage.content.mapNotNull { it.id }
+        val readCounts = if (noticeIds.isEmpty()) {
+            emptyMap()
+        } else {
+            noticeReadRepository.countGroupByNoticeIdIn(meetingId, noticeIds).associate { it.noticeId to it.readCount.toInt() }
+        }
+        val totalCount = memberRepository.countByMeetingId(meetingId).toInt()
+
         val summaries = noticePage.content.map { notice ->
+            val noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." }
             NoticeSummaryResponse(
-                noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." },
+                noticeId = noticeId,
                 title = notice.title,
+                readCount = readCounts[noticeId] ?: 0,
+                totalCount = totalCount,
                 createdAt = notice.createdAt.withOffsetSameInstant(KST)
             )
         }
@@ -133,6 +165,56 @@ class NoticeService(
             noticeId = checkNotNull(notice.id) { "공지사항 ID가 null입니다." },
             title = notice.title,
             content = notice.content
+        )
+    }
+
+    // 내 공지 읽음 처리: 여러 번 호출해도 처음 읽은 시각을 유지
+    @Transactional
+    fun readNotice(meetingId: Long, noticeId: Long, userId: Long): NoticeReadResponse {
+        val memberId = checkNotNull(memberService.validateMember(meetingId, userId).id) { "구성원 식별자가 없습니다." }
+
+        // 같은 공지를 잠금 조회해 동시에 처음 읽어도 기록이 하나만 남게 함 (unique 제약 위반 방지)
+        noticeRepository.findByIdAndMeetingIdForUpdate(noticeId, meetingId)
+            ?: throw ApiException(ErrorCode.NOT_FOUND, "공지사항을 찾을 수 없습니다.")
+
+        val noticeRead = noticeReadRepository.findByNoticeIdAndMemberId(noticeId, memberId)
+            ?: noticeReadRepository.save(NoticeRead(noticeId = noticeId, memberId = memberId))
+
+        return NoticeReadResponse(noticeId = noticeId, readAt = noticeRead.readAt.withOffsetSameInstant(KST))
+    }
+
+    // 공지 읽음 현황: 현재 모임 구성원 기준 (나중에 가입한 구성원은 미열람, 나간 구성원은 제외)
+    @Transactional(readOnly = true)
+    fun getNoticeReads(meetingId: Long, noticeId: Long, userId: Long): NoticeReadStatusResponse {
+        memberService.validateMember(meetingId, userId)
+        noticeRepository.findById(noticeId)
+            .filter { it.meetingId == meetingId }
+            .orElseThrow { ApiException(ErrorCode.NOT_FOUND, "공지사항을 찾을 수 없습니다.") }
+
+        val members = memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId)
+        val readAtByMemberId = noticeReadRepository.findAllByNoticeId(noticeId).associate { it.memberId to it.readAt }
+        val usersById = appUserRepository.findAllById(members.map { it.userId }).associateBy { it.id }
+
+        val readMembers = mutableListOf<NoticeReadMemberResponse>()
+        val unreadMembers = mutableListOf<NoticeUnreadMemberResponse>()
+        members.forEach { member ->
+            val memberId = checkNotNull(member.id) { "구성원 식별자가 없습니다." }
+            val user = usersById[member.userId]
+            val profileColor = user?.profileColor ?: ProfileColor.LIGHT_BLUE
+            val readAt = readAtByMemberId[memberId]
+            if (readAt == null) {
+                unreadMembers += NoticeUnreadMemberResponse(memberId, user?.name, profileColor)
+            } else {
+                readMembers += NoticeReadMemberResponse(memberId, user?.name, profileColor, readAt.withOffsetSameInstant(KST))
+            }
+        }
+
+        return NoticeReadStatusResponse(
+            noticeId = noticeId,
+            readCount = readMembers.size,
+            totalCount = members.size,
+            readMembers = readMembers.sortedWith(compareBy({ it.readAt }, { it.memberId })),
+            unreadMembers = unreadMembers
         )
     }
 

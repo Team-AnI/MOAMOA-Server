@@ -1,5 +1,6 @@
 package com.teamani.moamoa.notice.dto
 
+import com.teamani.moamoa.user.entity.ProfileColor
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Pattern
@@ -29,12 +30,18 @@ data class NoticeDetailResponse(
     val noticeId: Long,
     val title: String,
     val content: String,
+    // 정산·정기 회비 안내 공지에 연결된 정산 ID (없으면 null)
+    val settlementId: Long?,
     val createdAt: OffsetDateTime
 )
 
 data class NoticeSummaryResponse(
     val noticeId: Long,
     val title: String,
+    // 공지를 읽은 현재 구성원 수
+    val readCount: Int,
+    // 현재 모임 구성원 수
+    val totalCount: Int,
     val createdAt: OffsetDateTime
 )
 
@@ -66,4 +73,33 @@ data class NoticeUpdateResponse(
     val noticeId: Long,
     val title: String,
     val content: String
+)
+
+data class NoticeReadResponse(
+    val noticeId: Long,
+    // 처음 읽은 시각
+    val readAt: OffsetDateTime
+)
+
+data class NoticeReadStatusResponse(
+    val noticeId: Long,
+    val readCount: Int,
+    val totalCount: Int,
+    // 읽은 시각 순
+    val readMembers: List<NoticeReadMemberResponse>,
+    // memberId 오름차순 (모임 가입 순)
+    val unreadMembers: List<NoticeUnreadMemberResponse>
+)
+
+data class NoticeReadMemberResponse(
+    val memberId: Long,
+    val userName: String?,
+    val profileColor: ProfileColor,
+    val readAt: OffsetDateTime
+)
+
+data class NoticeUnreadMemberResponse(
+    val memberId: Long,
+    val userName: String?,
+    val profileColor: ProfileColor
 )
