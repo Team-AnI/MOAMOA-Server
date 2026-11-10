@@ -50,7 +50,7 @@ class MemberService(
         val members = memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId).map {
             MemberSummaryResponse(
                 memberId = checkNotNull(it.id) { "구성원 식별자가 없습니다." },
-                nickname = null,
+                userName = null,
                 role = it.role
             )
         }

@@ -15,4 +15,9 @@ interface AttendanceRepository : JpaRepository<Attendance, Long> {
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("delete from Attendance a where a.memberId = :memberId")
     fun deleteAllByMemberId(@Param("memberId") memberId: Long): Int
+
+    // 일정 삭제 시 해당 일정의 모든 출석 기록 일괄 삭제 (영속성 컨텍스트 동기화는 위와 같음)
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("delete from Attendance a where a.scheduleId = :scheduleId")
+    fun deleteAllByScheduleId(@Param("scheduleId") scheduleId: Long): Int
 }

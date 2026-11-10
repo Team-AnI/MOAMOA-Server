@@ -31,7 +31,7 @@ class MemberControllerTests : BehaviorSpec() {
     init {
         Given("구성원 목록 조회 요청(GET /v1/meetings/{meetingId}/members)이 주어졌을 때") {
             When("모임 구성원이 요청하면") {
-                Then("200과 구성원 목록을 반환하고 nickname은 null로 응답한다") {
+                Then("200과 구성원 목록을 반환하고 userName은 null로 응답한다") {
                     `when`(memberService.getMembers(1L, USER_ID)).thenReturn(
                         MemberListResponse(
                             listOf(
@@ -45,7 +45,7 @@ class MemberControllerTests : BehaviorSpec() {
                         status { isOk() }
                         jsonPath("$.success") { value(true) }
                         jsonPath("$.data.members[0].memberId") { value(100) }
-                        jsonPath("$.data.members[0].nickname") { value(null as Any?) }
+                        jsonPath("$.data.members[0].userName") { value(null as Any?) }
                         jsonPath("$.data.members[0].role") { value("ADMIN") }
                         jsonPath("$.data.members[1].role") { value("MEMBER") }
                     }

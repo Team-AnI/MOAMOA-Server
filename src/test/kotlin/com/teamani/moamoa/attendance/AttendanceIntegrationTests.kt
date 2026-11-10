@@ -113,7 +113,7 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                         jsonPath("$.data.attendances[0].status") { value("UNCHECKED") }
                         jsonPath("$.data.attendances[1].memberId") { value(firstMemberId.toInt()) }
                         jsonPath("$.data.attendances[1].status") { value("PRESENT") }
-                        jsonPath("$.data.attendances[1].nickname") { value(null as Any?) }
+                        jsonPath("$.data.attendances[1].userName") { value(null as Any?) }
                         jsonPath("$.data.attendances[2].memberId") { value(secondMemberId.toInt()) }
                         jsonPath("$.data.attendances[2].status") { value("UNCHECKED") }
                     }

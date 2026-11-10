@@ -238,7 +238,7 @@ class AttendanceControllerTests : BehaviorSpec() {
 
         Given("출석 현황 조회 요청(GET /v1/meetings/{meetingId}/schedules/{scheduleId}/attendances)이 주어졌을 때") {
             When("모임 구성원이 요청하면") {
-                Then("200과 구성원 전체의 출석 상태를 반환하고, 기록이 없는 구성원은 UNCHECKED, nickname은 null로 응답한다") {
+                Then("200과 구성원 전체의 출석 상태를 반환하고, 기록이 없는 구성원은 UNCHECKED, userName은 null로 응답한다") {
                     `when`(attendanceService.getAttendances(1L, USER_ID, 5L)).thenReturn(
                         AttendanceListResponse(
                             scheduleId = 5L,
@@ -255,7 +255,7 @@ class AttendanceControllerTests : BehaviorSpec() {
                         jsonPath("$.success") { value(true) }
                         jsonPath("$.data.scheduleId") { value(5) }
                         jsonPath("$.data.attendances[0].memberId") { value(100) }
-                        jsonPath("$.data.attendances[0].nickname") { value(null as Any?) }
+                        jsonPath("$.data.attendances[0].userName") { value(null as Any?) }
                         jsonPath("$.data.attendances[0].status") { value("PRESENT") }
                         jsonPath("$.data.attendances[1].status") { value("LATE") }
                         jsonPath("$.data.attendances[2].memberId") { value(300) }

@@ -6,10 +6,10 @@ data class MemberListResponse(
     val members: List<MemberSummaryResponse>
 )
 
-// nickname은 User 도메인 구현 전까지 null 반환
+// userName은 User 도메인 구현 전까지 null 반환
 data class MemberSummaryResponse(
     val memberId: Long,
-    val nickname: String?,
+    val userName: String?,
     val role: MemberRole
 )
 

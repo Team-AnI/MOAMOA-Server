@@ -74,6 +74,7 @@ class AttendanceServiceTests : BehaviorSpec({
 
     fun stubSchedule(schedule: Schedule?, attendances: List<Attendance> = emptyList()) {
         `when`(scheduleRepository.findByIdAndMeetingId(scheduleId, meetingId)).thenReturn(schedule)
+        `when`(scheduleRepository.findByIdAndMeetingIdForUpdate(scheduleId, meetingId)).thenReturn(schedule)
         `when`(attendanceRepository.findAllByScheduleId(scheduleId)).thenReturn(attendances)
     }
 
@@ -174,7 +175,7 @@ class AttendanceServiceTests : BehaviorSpec({
                 shouldThrow<ApiException> {
                     attendanceService.updateAttendances(meetingId, adminUserId, scheduleId, request(200L to "PRESENT"))
                 }.errorCode shouldBe ErrorCode.NOT_FOUND
-                verify(scheduleRepository, never()).findByIdAndMeetingId(anyLong(), anyLong())
+                verify(scheduleRepository, never()).findByIdAndMeetingIdForUpdate(anyLong(), anyLong())
             }
         }
         When("일정이 없거나 다른 모임의 일정이면") {
@@ -297,7 +298,7 @@ class AttendanceServiceTests : BehaviorSpec({
                 response.attendances.map { it.memberId } shouldContainExactly listOf(100L, 200L, 300L)
                 response.attendances.map { it.status } shouldContainExactly
                     listOf(AttendanceViewStatus.PRESENT, AttendanceViewStatus.LATE, AttendanceViewStatus.UNCHECKED)
-                response.attendances.map { it.nickname } shouldContainExactly listOf(null, null, null)
+                response.attendances.map { it.userName } shouldContainExactly listOf(null, null, null)
             }
         }
         When("결석으로 체크된 구성원이 있으면") {

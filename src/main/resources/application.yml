@@ -7,3 +7,15 @@ spring:
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+
+server:
+  # Nginx가 전달한 X-Forwarded-* 헤더(/api 접두어·https)를 요청 URL에 반영
+  forward-headers-strategy: framework
+
+moamoa:
+  cors:
+    # 쉼표로 구분, 값이 없으면 허용 Origin 없음 (운영 값은 production Environment variable로 관리)
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+
+jwt:
+  secret: ${JWT_SECRET}

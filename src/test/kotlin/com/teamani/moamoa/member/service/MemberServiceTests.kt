@@ -85,7 +85,7 @@ class MemberServiceTests : BehaviorSpec({
 
     Given("구성원 목록을 조회할 때") {
         When("모임 구성원이 요청하면") {
-            Then("구성원 id·nickname(null)·role 목록을 반환한다") {
+            Then("구성원 id·userName(null)·role 목록을 반환한다") {
                 `when`(memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId)).thenReturn(listOf(admin, member))
 
                 val response = memberService.getMembers(meetingId, memberUserId)
@@ -93,7 +93,7 @@ class MemberServiceTests : BehaviorSpec({
                 response.members shouldHaveSize 2
                 response.members[0].memberId shouldBe 100L
                 response.members[0].role shouldBe MemberRole.ADMIN
-                response.members[0].nickname.shouldBeNull()
+                response.members[0].userName.shouldBeNull()
                 response.members[1].memberId shouldBe 200L
                 response.members[1].role shouldBe MemberRole.MEMBER
             }

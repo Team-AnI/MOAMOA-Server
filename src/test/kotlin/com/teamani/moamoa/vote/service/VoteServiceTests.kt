@@ -468,7 +468,7 @@ class VoteServiceTests : BehaviorSpec({
                 response.members[1].submittedAt shouldBe memberSubmittedAt.withOffsetSameInstant(kst)
                 response.members[2].submittedAt.shouldBeNull()
                 response.members[3].submittedAt shouldBe lateSubmittedAt.withOffsetSameInstant(kst)
-                response.members.map { it.nickname }.distinct() shouldContainExactly listOf(null)
+                response.members.map { it.userName }.distinct() shouldContainExactly listOf(null)
             }
         }
         When("MEMBER가 요청하면") {
