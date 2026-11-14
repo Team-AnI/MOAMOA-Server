@@ -2,6 +2,7 @@ package com.teamani.moamoa.settlement.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.settlement.dto.RegularDuesCreateRequest
 import com.teamani.moamoa.settlement.dto.RegularDuesCreateResponse
 import com.teamani.moamoa.settlement.dto.RegularDuesDeleteResponse
@@ -21,7 +22,8 @@ import java.util.Optional
 @Service
 class RegularDuesService(
     private val regularDuesRepository: RegularDuesRepository,
-    private val settlementRepository: SettlementRepository
+    private val settlementRepository: SettlementRepository,
+    private val memberRepository: MemberRepository
 ) {
 
     @Transactional
@@ -33,13 +35,15 @@ class RegularDuesService(
         val cycleType = CycleType.valueOf(requireNotNull(request.cycleType) { "반복 주기는 필수입니다." })
         val cycleDay = requireNotNull(request.cycleDay) { "반복 지정일은 필수입니다." }
         validateCycleDay(cycleType, cycleDay)
+        val amount = requireNotNull(request.amount) { "회비 금액은 필수입니다." }
+        validateTotalAmount(meetingId, amount)
 
         val regularDues = regularDuesRepository.save(
             RegularDues(
                 meetingId = meetingId,
                 createdBy = memberId,
                 title = requireNotNull(request.title) { "회비명은 필수입니다." },
-                amount = requireNotNull(request.amount) { "회비 금액은 필수입니다." },
+                amount = amount,
                 cycleType = cycleType,
                 cycleDay = cycleDay,
                 sendTime = request.sendTime?.let { LocalTime.parse(it, SEND_TIME_INPUT_FORMAT) } ?: RegularDues.DEFAULT_SEND_TIME,
@@ -78,12 +82,17 @@ class RegularDuesService(
         validateMeeting(meetingId)
         validateAdmin(meetingId, memberId)
 
-        val regularDues = regularDuesRepository.findByIdAndMeetingId(regularDuesId, meetingId)
+        // 자동 청구와 같은 정기 회비 잠금으로 조회해, 청구 중이면 끝난 뒤 수정 (청구는 바뀐 설정으로 다시 확인)
+        val regularDues = regularDuesRepository.findByIdAndMeetingIdForUpdate(regularDuesId, meetingId)
             ?: throw ApiException(ErrorCode.NOT_FOUND, "정기 회비를 찾을 수 없습니다.")
 
         // 모든 항목이 필수라 null로 보내면 비우지 않고 400
         val cycleType = request.cycleType.valueOrKeep("반복 주기")?.let { CycleType.valueOf(it) }
         val cycleDay = request.cycleDay.valueOrKeep("반복 지정일")
+        // 매주·매월은 회차 기준일(그 주 월요일·그 달 1일)이 같은 날로 겹칠 수 있어, 바꾸면 회차가 빠질 수 있음 → 삭제 후 새로 등록
+        if (cycleType != null && cycleType != regularDues.cycleType) {
+            throw ApiException(ErrorCode.VALIDATION_ERROR, "반복 주기는 바꿀 수 없습니다. 삭제 후 새로 등록해 주세요.")
+        }
         if (cycleType != null && cycleDay == null) {
             throw ApiException(ErrorCode.VALIDATION_ERROR, "반복 주기를 바꿀 때는 반복 지정일도 함께 보내야 합니다.")
         }
@@ -91,11 +100,15 @@ class RegularDuesService(
         if (cycleDay != null) {
             validateCycleDay(cycleType ?: regularDues.cycleType, cycleDay)
         }
+        val amount = request.amount.valueOrKeep("회비 금액")
+        if (amount != null) {
+            validateTotalAmount(meetingId, amount)
+        }
 
         // 변경 감지(Dirty Checking)로 트랜잭션 종료 시 반영, 이미 생성된 회차 정산은 바뀌지 않음
         regularDues.update(
             title = request.title.valueOrKeep("회비명"),
-            amount = request.amount.valueOrKeep("회비 금액"),
+            amount = amount,
             cycleType = cycleType,
             cycleDay = cycleDay,
             sendTime = request.sendTime.valueOrKeep("발송 시간")?.let { LocalTime.parse(it, SEND_TIME_INPUT_FORMAT) },
@@ -115,7 +128,8 @@ class RegularDuesService(
         validateMeeting(meetingId)
         validateAdmin(meetingId, memberId)
 
-        val regularDues = regularDuesRepository.findByIdAndMeetingId(regularDuesId, meetingId)
+        // 연결 해제 전에 자동 청구와 같은 잠금을 잡아, 청구 중에 만들어진 회차 정산까지 연결을 해제
+        val regularDues = regularDuesRepository.findByIdAndMeetingIdForUpdate(regularDuesId, meetingId)
             ?: throw ApiException(ErrorCode.NOT_FOUND, "정기 회비를 찾을 수 없습니다.")
 
         // 이미 생성된 회차의 정산·납부 내역은 유지하고 연결만 해제한 뒤 삭제
@@ -153,6 +167,13 @@ class RegularDuesService(
         }
         if (!valid) {
             throw ApiException(ErrorCode.VALIDATION_ERROR, "반복 지정일이 반복 주기에 맞지 않습니다.")
+        }
+    }
+
+    // 회차 정산 총액(1인당 금액 × 지금 구성원 수)이 정산 총액 최대값을 넘으면 청구할 수 없으므로 등록·수정 때 바로 400
+    private fun validateTotalAmount(meetingId: Long, amount: Int) {
+        if (amount.toLong() * memberRepository.countByMeetingId(meetingId) > Int.MAX_VALUE) {
+            throw ApiException(ErrorCode.VALIDATION_ERROR, "1인당 금액 × 구성원 수가 정산 총액 최대값(2,147,483,647원)을 넘습니다.")
         }
     }
 

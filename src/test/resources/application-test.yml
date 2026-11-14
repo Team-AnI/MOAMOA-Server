@@ -8,5 +8,8 @@ jwt:
   secret: test-only-secret-key-for-moamoa-jwt-0123456789
 
 moamoa:
+  # 테스트 중 정기 회비 자동 청구 스케줄러가 테스트 데이터로 정산을 만들지 않도록 끔
+  scheduler:
+    enabled: false
   cors:
     allowed-origins: https://allowed.example.com
