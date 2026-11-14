@@ -1,5 +1,6 @@
 package com.teamani.moamoa.meeting.controller
 
+import com.teamani.moamoa.global.auth.JwtTokenProvider
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.meeting.dto.MeetingCreateRequest
@@ -18,8 +19,10 @@ import com.teamani.moamoa.member.entity.MemberRole
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import org.mockito.Mockito.`when`
+import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
@@ -41,7 +44,14 @@ class MeetingControllerTests : BehaviorSpec() {
     @MockitoBean
     lateinit var meetingService: MeetingService
 
+    @MockitoBean
+    lateinit var jwtTokenProvider: JwtTokenProvider
+
     init {
+        beforeTest {
+            `when`(jwtTokenProvider.getUserId(ACCESS_TOKEN)).thenReturn(USER_ID)
+        }
+
         Given("모임 생성 요청(POST /v1/meetings)이 주어졌을 때") {
             When("유효한 요청이면") {
                 Then("201과 공통 응답 형식으로 모임 정보와 초대코드를 반환한다") {
@@ -49,6 +59,7 @@ class MeetingControllerTests : BehaviorSpec() {
                         .thenReturn(MeetingCreateResponse(1L, "모아모아", "A1B2C3D4", MemberRole.ADMIN))
 
                     mockMvc.post("/v1/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"name":"모아모아","description":"모임 소개"}"""
                     }.andExpect {
@@ -65,6 +76,7 @@ class MeetingControllerTests : BehaviorSpec() {
             When("name이 공백이면") {
                 Then("400 VALIDATION_ERROR와 name 필드 details를 응답한다") {
                     mockMvc.post("/v1/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"name":"  "}"""
                     }.andExpect {
@@ -76,6 +88,7 @@ class MeetingControllerTests : BehaviorSpec() {
             When("name이 없으면") {
                 Then("400 VALIDATION_ERROR를 응답한다") {
                     mockMvc.post("/v1/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"description":"모임 소개"}"""
                     }.andExpect {
@@ -86,6 +99,7 @@ class MeetingControllerTests : BehaviorSpec() {
             When("name이 20자를 넘으면") {
                 Then("400 VALIDATION_ERROR를 응답한다") {
                     mockMvc.post("/v1/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"name":"${"가".repeat(21)}"}"""
                     }.andExpect {
@@ -100,6 +114,7 @@ class MeetingControllerTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.CONFLICT, "초대코드 생성 중 충돌이 발생했습니다. 다시 시도해 주세요."))
 
                     mockMvc.post("/v1/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"name":"모아모아"}"""
                     }.andExpect {
@@ -117,7 +132,9 @@ class MeetingControllerTests : BehaviorSpec() {
                         MyMeetingListResponse(listOf(MyMeetingSummaryResponse(1L, "모아모아", 3L, MemberRole.MEMBER)))
                     )
 
-                    mockMvc.get("/v1/me/meetings").andExpect {
+                    mockMvc.get("/v1/me/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.success") { value(true) }
                         jsonPath("$.data.meetings[0].meetingId") { value(1) }
@@ -135,6 +152,7 @@ class MeetingControllerTests : BehaviorSpec() {
                         .thenReturn(MeetingJoinResponse(1L, "모아모아", MemberRole.MEMBER))
 
                     mockMvc.post("/v1/me/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"inviteCode":"A1B2C3D4"}"""
                     }.andExpect {
@@ -147,6 +165,7 @@ class MeetingControllerTests : BehaviorSpec() {
             When("inviteCode가 공백이면") {
                 Then("400 VALIDATION_ERROR를 응답한다") {
                     mockMvc.post("/v1/me/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"inviteCode":""}"""
                     }.andExpect {
@@ -159,6 +178,7 @@ class MeetingControllerTests : BehaviorSpec() {
                 Then("400 VALIDATION_ERROR를 응답한다") {
                     listOf(" A1B2C3D4", "A1B2C3D4 ", "A1B2 C3D4").forEach { inviteCode ->
                         mockMvc.post("/v1/me/meetings") {
+                            header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                             contentType = MediaType.APPLICATION_JSON
                             content = """{"inviteCode":"$inviteCode"}"""
                         }.andExpect {
@@ -175,6 +195,7 @@ class MeetingControllerTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.NOT_FOUND, "초대코드에 해당하는 모임을 찾을 수 없습니다."))
 
                     mockMvc.post("/v1/me/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"inviteCode":"ZZZZZZZZ"}"""
                     }.andExpect {
@@ -188,6 +209,7 @@ class MeetingControllerTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.CONFLICT, "이미 참여한 모임입니다."))
 
                     mockMvc.post("/v1/me/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"inviteCode":"JOINED01"}"""
                     }.andExpect {
@@ -204,7 +226,9 @@ class MeetingControllerTests : BehaviorSpec() {
                     `when`(meetingService.getMeeting(1L, USER_ID))
                         .thenReturn(MeetingDetailResponse(1L, "모아모아", null, 2L, MemberRole.ADMIN))
 
-                    mockMvc.get("/v1/meetings/1").andExpect {
+                    mockMvc.get("/v1/meetings/1") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.meetingId") { value(1) }
                         jsonPath("$.data.description") { value(null as Any?) }
@@ -218,14 +242,18 @@ class MeetingControllerTests : BehaviorSpec() {
                     `when`(meetingService.getMeeting(2L, USER_ID))
                         .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 구성원만 요청할 수 있습니다."))
 
-                    mockMvc.get("/v1/meetings/2").andExpect {
+                    mockMvc.get("/v1/meetings/2") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         expectError(403, "FORBIDDEN")
                     }
                 }
             }
             When("meetingId가 숫자가 아니면") {
                 Then("400 INPUT_ERROR를 응답한다") {
-                    mockMvc.get("/v1/meetings/abc").andExpect {
+                    mockMvc.get("/v1/meetings/abc") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         expectError(400, "INPUT_ERROR")
                     }
                 }
@@ -239,6 +267,7 @@ class MeetingControllerTests : BehaviorSpec() {
                         .thenReturn(MeetingUpdateResponse(1L, "새 이름", "모임 소개"))
 
                     mockMvc.patch("/v1/meetings/1") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"name":"새 이름"}"""
                     }.andExpect {
@@ -254,6 +283,7 @@ class MeetingControllerTests : BehaviorSpec() {
                         .thenReturn(MeetingUpdateResponse(1L, "모아모아", null))
 
                     mockMvc.patch("/v1/meetings/1") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"description":null}"""
                     }.andExpect {
@@ -269,6 +299,7 @@ class MeetingControllerTests : BehaviorSpec() {
                         .thenReturn(MeetingUpdateResponse(1L, "모아모아", "새 소개"))
 
                     mockMvc.patch("/v1/meetings/1") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"description":"새 소개"}"""
                     }.andExpect {
@@ -280,6 +311,7 @@ class MeetingControllerTests : BehaviorSpec() {
             When("name에 null을 보내면") {
                 Then("필수 항목이므로 400 VALIDATION_ERROR를 응답한다") {
                     mockMvc.patch("/v1/meetings/1") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"name":null}"""
                     }.andExpect {
@@ -291,6 +323,7 @@ class MeetingControllerTests : BehaviorSpec() {
             When("name을 20자 초과로 보내면") {
                 Then("400 VALIDATION_ERROR를 응답한다") {
                     mockMvc.patch("/v1/meetings/1") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"name":"${"가".repeat(21)}"}"""
                     }.andExpect {
@@ -302,6 +335,7 @@ class MeetingControllerTests : BehaviorSpec() {
             When("name을 공백으로 보내면") {
                 Then("400 VALIDATION_ERROR를 응답한다") {
                     mockMvc.patch("/v1/meetings/1") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"name":"   "}"""
                     }.andExpect {
@@ -317,7 +351,9 @@ class MeetingControllerTests : BehaviorSpec() {
                 Then("200과 meetingId를 반환한다") {
                     `when`(meetingService.deleteMeeting(1L, USER_ID)).thenReturn(MeetingDeleteResponse(1L))
 
-                    mockMvc.delete("/v1/meetings/1").andExpect {
+                    mockMvc.delete("/v1/meetings/1") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.meetingId") { value(1) }
                     }
@@ -330,9 +366,62 @@ class MeetingControllerTests : BehaviorSpec() {
                 Then("200과 초대코드를 반환한다") {
                     `when`(meetingService.getInviteCode(1L, USER_ID)).thenReturn(MeetingInviteCodeResponse("A1B2C3D4"))
 
-                    mockMvc.get("/v1/meetings/1/invite-code").andExpect {
+                    mockMvc.get("/v1/meetings/1/invite-code") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.inviteCode") { value("A1B2C3D4") }
+                    }
+                }
+            }
+        }
+
+        Given("인증되지 않은 모임 생성 요청이 주어졌을 때") {
+            When("Authorization 헤더가 없으면") {
+                Then("401 UNAUTHORIZED이고 Service를 호출하지 않는다") {
+                    mockMvc.post("/v1/meetings") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{"name":"모아모아"}"""
+                    }.andExpect {
+                        expectError(401, "UNAUTHORIZED")
+                    }
+
+                    verifyNoInteractions(meetingService)
+                }
+            }
+            When("Bearer 형식이 아니면") {
+                Then("401 UNAUTHORIZED를 응답한다") {
+                    mockMvc.post("/v1/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, ACCESS_TOKEN)
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{"name":"모아모아"}"""
+                    }.andExpect {
+                        expectError(401, "UNAUTHORIZED")
+                    }
+                }
+            }
+            When("토큰이 유효하지 않으면") {
+                Then("401 UNAUTHORIZED를 응답한다") {
+                    `when`(jwtTokenProvider.getUserId("invalid-token")).thenThrow(ApiException(ErrorCode.UNAUTHORIZED))
+
+                    mockMvc.post("/v1/meetings") {
+                        header(HttpHeaders.AUTHORIZATION, "Bearer invalid-token")
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{"name":"모아모아"}"""
+                    }.andExpect {
+                        expectError(401, "UNAUTHORIZED")
+                    }
+
+                    verifyNoInteractions(meetingService)
+                }
+            }
+            When("토큰도 없고 요청값도 잘못되었으면") {
+                Then("요청값 검증보다 인증을 먼저 확인해 401 UNAUTHORIZED를 응답한다") {
+                    mockMvc.post("/v1/meetings") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{"name":"  "}"""
+                    }.andExpect {
+                        expectError(401, "UNAUTHORIZED")
                     }
                 }
             }
@@ -347,7 +436,9 @@ class MeetingControllerTests : BehaviorSpec() {
     }
 
     companion object {
-        // 인증 구현 전 Controller의 임시 사용자 ID
+        // 토큰 검증은 mock으로 대체: ACCESS_TOKEN을 보내면 USER_ID로 인증
         private const val USER_ID = 1L
+        private const val ACCESS_TOKEN = "test-access-token"
+        private const val BEARER_TOKEN = "Bearer $ACCESS_TOKEN"
     }
 }

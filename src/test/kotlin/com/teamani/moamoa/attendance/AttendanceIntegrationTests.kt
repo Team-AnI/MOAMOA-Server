@@ -3,6 +3,7 @@ package com.teamani.moamoa.attendance
 import com.teamani.moamoa.attendance.entity.Attendance
 import com.teamani.moamoa.attendance.entity.AttendanceStatus
 import com.teamani.moamoa.attendance.repository.AttendanceRepository
+import com.teamani.moamoa.global.auth.JwtTokenProvider
 import com.teamani.moamoa.meeting.entity.Meeting
 import com.teamani.moamoa.meeting.repository.MeetingRepository
 import com.teamani.moamoa.member.entity.Member
@@ -22,6 +23,7 @@ import org.mockito.Mockito.doAnswer
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
@@ -42,6 +44,9 @@ class AttendanceIntegrationTests : BehaviorSpec() {
 
     @Autowired
     lateinit var mockMvc: MockMvc
+
+    @Autowired
+    lateinit var jwtTokenProvider: JwtTokenProvider
 
     @Autowired
     lateinit var jdbcTemplate: JdbcTemplate
@@ -298,7 +303,9 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                         )
                     )
 
-                    mockMvc.delete("/v1/meetings/$meetingId/members/me").andExpect {
+                    mockMvc.delete("/v1/meetings/$meetingId/members/me") {
+                        header(HttpHeaders.AUTHORIZATION, "Bearer ${jwtTokenProvider.createAccessToken(USER_ID)}")
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.meetingId") { value(meetingId.toInt()) }
                     }

@@ -1,5 +1,6 @@
 package com.teamani.moamoa.meeting.controller
 
+import com.teamani.moamoa.global.auth.CurrentUserId
 import com.teamani.moamoa.global.response.CommonResponse
 import com.teamani.moamoa.meeting.dto.MeetingCreateRequest
 import com.teamani.moamoa.meeting.dto.MeetingCreateResponse
@@ -31,19 +32,18 @@ class MeetingController(
 
     @PostMapping("/v1/meetings")
     fun createMeeting(
+        @CurrentUserId currentUserId: Long,
         @Valid @RequestBody request: MeetingCreateRequest
     ): ResponseEntity<CommonResponse<MeetingCreateResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: MeetingCreateResponse = meetingService.createMeeting(currentUserId, request)
 
         return ResponseEntity.status(HttpStatus.CREATED).body(CommonResponse(data = response))
     }
 
     @GetMapping("/v1/me/meetings")
-    fun getMyMeetings(): ResponseEntity<CommonResponse<MyMeetingListResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
+    fun getMyMeetings(
+        @CurrentUserId currentUserId: Long
+    ): ResponseEntity<CommonResponse<MyMeetingListResponse>> {
         val response: MyMeetingListResponse = meetingService.getMyMeetings(currentUserId)
 
         return ResponseEntity.ok(CommonResponse(data = response))
@@ -51,10 +51,9 @@ class MeetingController(
 
     @PostMapping("/v1/me/meetings")
     fun joinMeeting(
+        @CurrentUserId currentUserId: Long,
         @Valid @RequestBody request: MeetingJoinRequest
     ): ResponseEntity<CommonResponse<MeetingJoinResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: MeetingJoinResponse = meetingService.joinMeeting(currentUserId, request)
 
         return ResponseEntity.status(HttpStatus.CREATED).body(CommonResponse(data = response))
@@ -62,10 +61,9 @@ class MeetingController(
 
     @GetMapping("/v1/meetings/{meetingId}")
     fun getMeeting(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long
     ): ResponseEntity<CommonResponse<MeetingDetailResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: MeetingDetailResponse = meetingService.getMeeting(meetingId, currentUserId)
 
         return ResponseEntity.ok(CommonResponse(data = response))
@@ -73,11 +71,10 @@ class MeetingController(
 
     @PatchMapping("/v1/meetings/{meetingId}")
     fun updateMeeting(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @Valid @RequestBody request: MeetingUpdateRequest
     ): ResponseEntity<CommonResponse<MeetingUpdateResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: MeetingUpdateResponse = meetingService.updateMeeting(meetingId, currentUserId, request)
 
         return ResponseEntity.ok(CommonResponse(data = response))
@@ -85,10 +82,9 @@ class MeetingController(
 
     @DeleteMapping("/v1/meetings/{meetingId}")
     fun deleteMeeting(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long
     ): ResponseEntity<CommonResponse<MeetingDeleteResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: MeetingDeleteResponse = meetingService.deleteMeeting(meetingId, currentUserId)
 
         return ResponseEntity.ok(CommonResponse(data = response))
@@ -96,10 +92,9 @@ class MeetingController(
 
     @GetMapping("/v1/meetings/{meetingId}/invite-code")
     fun getInviteCode(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long
     ): ResponseEntity<CommonResponse<MeetingInviteCodeResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: MeetingInviteCodeResponse = meetingService.getInviteCode(meetingId, currentUserId)
 
         return ResponseEntity.ok(CommonResponse(data = response))

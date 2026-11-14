@@ -1,5 +1,8 @@
 package com.teamani.moamoa.global.auth
 
+import com.teamani.moamoa.global.exception.ApiException
+import com.teamani.moamoa.global.exception.ErrorCode
+import io.jsonwebtoken.JwtException
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
 import org.springframework.beans.factory.annotation.Value
@@ -8,7 +11,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.Date
 
-// JWT 액세스 토큰 발급 (요청 검증은 공통 인증 #66에서 추가)
+// JWT 액세스 토큰 발급 및 검증
 @Component
 class JwtTokenProvider(
     @Value("\${jwt.secret}") secret: String
@@ -26,6 +29,23 @@ class JwtTokenProvider(
             .expiration(Date.from(now.plus(ACCESS_TOKEN_VALIDITY)))
             .signWith(key)
             .compact()
+    }
+
+    // 서명·만료를 확인하고 subject의 userId를 반환. 위조·만료·형식 오류는 모두 401
+    fun getUserId(accessToken: String): Long {
+        val subject = try {
+            Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(accessToken)
+                .payload
+                .subject
+        } catch (e: JwtException) {
+            throw ApiException(ErrorCode.UNAUTHORIZED)
+        } catch (e: IllegalArgumentException) {
+            throw ApiException(ErrorCode.UNAUTHORIZED)
+        }
+        return subject?.toLongOrNull() ?: throw ApiException(ErrorCode.UNAUTHORIZED)
     }
 
     companion object {
