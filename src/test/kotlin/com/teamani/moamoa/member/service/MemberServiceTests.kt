@@ -7,6 +7,7 @@ import com.teamani.moamoa.meeting.repository.MeetingRepository
 import com.teamani.moamoa.member.entity.Member
 import com.teamani.moamoa.member.entity.MemberRole
 import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.notice.repository.NoticeReadRepository
 import com.teamani.moamoa.vote.repository.VoteRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
@@ -28,7 +29,8 @@ class MemberServiceTests : BehaviorSpec({
     val memberRepository: MemberRepository = mock(MemberRepository::class.java)
     val voteRepository: VoteRepository = mock(VoteRepository::class.java)
     val attendanceRepository: AttendanceRepository = mock(AttendanceRepository::class.java)
-    val memberService = MemberService(meetingRepository, memberRepository, voteRepository, attendanceRepository)
+    val noticeReadRepository: NoticeReadRepository = mock(NoticeReadRepository::class.java)
+    val memberService = MemberService(meetingRepository, memberRepository, voteRepository, attendanceRepository, noticeReadRepository)
 
     val meetingId = 1L
     val adminUserId = 10L
@@ -38,10 +40,12 @@ class MemberServiceTests : BehaviorSpec({
     val member = Member(meetingId = meetingId, userId = memberUserId, role = MemberRole.MEMBER, id = 200L)
 
     beforeTest {
-        reset(meetingRepository, memberRepository, voteRepository, attendanceRepository)
+        reset(meetingRepository, memberRepository, voteRepository, attendanceRepository, noticeReadRepository)
         `when`(meetingRepository.existsByIdAndEndedAtIsNull(meetingId)).thenReturn(true)
         `when`(memberRepository.findByMeetingIdAndUserId(meetingId, adminUserId)).thenReturn(admin)
         `when`(memberRepository.findByMeetingIdAndUserId(meetingId, memberUserId)).thenReturn(member)
+        `when`(memberRepository.findByMeetingIdAndUserIdForUpdate(meetingId, adminUserId)).thenReturn(admin)
+        `when`(memberRepository.findByMeetingIdAndUserIdForUpdate(meetingId, memberUserId)).thenReturn(member)
     }
 
     Given("모임 구성원 권한을 검증할 때") {
@@ -102,23 +106,25 @@ class MemberServiceTests : BehaviorSpec({
 
     Given("모임을 탈퇴할 때") {
         When("MEMBER가 요청하면") {
-            Then("투표 응답과 출석 기록을 먼저 삭제한 뒤 구성원 정보를 삭제하고 meetingId를 반환한다") {
+            Then("투표 응답, 출석 기록, 공지 읽음 기록을 먼저 삭제한 뒤 구성원 정보를 삭제하고 meetingId를 반환한다") {
                 val response = memberService.leaveMeeting(meetingId, memberUserId)
 
                 response.meetingId shouldBe meetingId
-                val order = inOrder(voteRepository, attendanceRepository, memberRepository)
+                val order = inOrder(voteRepository, attendanceRepository, noticeReadRepository, memberRepository)
                 order.verify(voteRepository).deleteAllByMemberId(200L)
                 order.verify(attendanceRepository).deleteAllByMemberId(200L)
+                order.verify(noticeReadRepository).deleteAllByMemberId(200L)
                 order.verify(memberRepository).delete(member)
             }
         }
         When("ADMIN이 요청하면") {
-            Then("422 UNPROCESSABLE_ENTITY 예외가 발생하고 구성원 정보와 투표 응답·출석 기록은 유지된다") {
+            Then("422 UNPROCESSABLE_ENTITY 예외가 발생하고 구성원 정보와 투표 응답·출석·공지 읽음 기록은 유지된다") {
                 shouldThrow<ApiException> {
                     memberService.leaveMeeting(meetingId, adminUserId)
                 }.errorCode shouldBe ErrorCode.UNPROCESSABLE_ENTITY
                 verify(voteRepository, never()).deleteAllByMemberId(anyLong())
                 verify(attendanceRepository, never()).deleteAllByMemberId(anyLong())
+                verify(noticeReadRepository, never()).deleteAllByMemberId(anyLong())
                 verify(memberRepository, never()).delete(any(Member::class.java))
             }
         }

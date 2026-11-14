@@ -6,6 +6,8 @@ import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
 import com.teamani.moamoa.notice.dto.NoticeDetailResponse
 import com.teamani.moamoa.notice.dto.NoticeListResponse
+import com.teamani.moamoa.notice.dto.NoticeReadResponse
+import com.teamani.moamoa.notice.dto.NoticeReadStatusResponse
 import com.teamani.moamoa.notice.dto.NoticeUpdateRequest
 import com.teamani.moamoa.notice.dto.NoticeUpdateResponse
 import com.teamani.moamoa.notice.service.NoticeService
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -86,6 +89,28 @@ class NoticeController(
     ): ResponseEntity<CommonResponse<NoticeUpdateResponse>> {
         val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
         val response: NoticeUpdateResponse = noticeService.updateNotice(meetingId, noticeId, currentUserId, request)
+
+        return ResponseEntity.ok(CommonResponse(data = response))
+    }
+
+    @PutMapping("/{noticeId}/reads/me")
+    fun readNotice(
+        @PathVariable meetingId: Long,
+        @PathVariable noticeId: Long
+    ): ResponseEntity<CommonResponse<NoticeReadResponse>> {
+        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체 (#66)
+        val response: NoticeReadResponse = noticeService.readNotice(meetingId, noticeId, currentUserId)
+
+        return ResponseEntity.ok(CommonResponse(data = response))
+    }
+
+    @GetMapping("/{noticeId}/reads")
+    fun getNoticeReads(
+        @PathVariable meetingId: Long,
+        @PathVariable noticeId: Long
+    ): ResponseEntity<CommonResponse<NoticeReadStatusResponse>> {
+        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체 (#66)
+        val response: NoticeReadStatusResponse = noticeService.getNoticeReads(meetingId, noticeId, currentUserId)
 
         return ResponseEntity.ok(CommonResponse(data = response))
     }

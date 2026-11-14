@@ -6,8 +6,13 @@ import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.dto.NoticeDeleteResponse
 import com.teamani.moamoa.notice.dto.NoticeDetailResponse
 import com.teamani.moamoa.notice.dto.NoticeListResponse
+import com.teamani.moamoa.notice.dto.NoticeReadMemberResponse
+import com.teamani.moamoa.notice.dto.NoticeReadResponse
+import com.teamani.moamoa.notice.dto.NoticeReadStatusResponse
 import com.teamani.moamoa.notice.dto.NoticeSummaryResponse
+import com.teamani.moamoa.notice.dto.NoticeUnreadMemberResponse
 import com.teamani.moamoa.notice.service.NoticeService
+import com.teamani.moamoa.user.entity.ProfileColor
 import io.kotest.core.spec.style.BehaviorSpec
 import org.mockito.Mockito.`when`
 import org.mockito.Mockito.mock
@@ -16,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
@@ -120,6 +126,7 @@ class NoticeControllerTests : BehaviorSpec({
             noticeId = noticeId,
             title = "10월 회비 안내",
             content = "10월 회비는 10일까지 납부 부탁드립니다.",
+            settlementId = 40L,
             createdAt = now
         )
 
@@ -137,6 +144,7 @@ class NoticeControllerTests : BehaviorSpec({
                     .andExpect(jsonPath("$.data.noticeId").value(30L))
                     .andExpect(jsonPath("$.data.title").value("10월 회비 안내"))
                     .andExpect(jsonPath("$.data.content").value("10월 회비는 10일까지 납부 부탁드립니다."))
+                    .andExpect(jsonPath("$.data.settlementId").value(40L))
                     .andExpect(jsonPath("$.data.createdAt").exists())
                     .andExpect(jsonPath("$.error").doesNotExist())
                     .andExpect(jsonPath("$.timestamp").exists())
@@ -154,6 +162,8 @@ class NoticeControllerTests : BehaviorSpec({
                 NoticeSummaryResponse(
                     noticeId = 30L,
                     title = "10월 회비 안내",
+                    readCount = 6,
+                    totalCount = 8,
                     createdAt = now
                 )
             ),
@@ -177,6 +187,8 @@ class NoticeControllerTests : BehaviorSpec({
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.notices[0].noticeId").value(30L))
                     .andExpect(jsonPath("$.data.notices[0].title").value("10월 회비 안내"))
+                    .andExpect(jsonPath("$.data.notices[0].readCount").value(6))
+                    .andExpect(jsonPath("$.data.notices[0].totalCount").value(8))
                     .andExpect(jsonPath("$.data.notices[0].createdAt").exists())
                     .andExpect(jsonPath("$.data.page").value(0))
                     .andExpect(jsonPath("$.data.size").value(20))
@@ -208,6 +220,61 @@ class NoticeControllerTests : BehaviorSpec({
 
             Then("400 Bad Request를 반환한다") {
                 resultActions.andExpect(status().isBadRequest)
+            }
+        }
+    }
+
+    Given("공지 읽음 처리 요청(PUT .../reads/me)이 주어졌을 때") {
+        val meetingId = 1L
+        val noticeId = 30L
+        val readAt = OffsetDateTime.parse("2026-10-07T10:05:00+09:00")
+
+        `when`(noticeService.readNotice(meetingId, noticeId, 1L)).thenReturn(NoticeReadResponse(noticeId, readAt))
+
+        When("읽음 처리 API를 호출하면") {
+            val resultActions = mockMvc.perform(put("/v1/meetings/$meetingId/notices/$noticeId/reads/me"))
+
+            Then("200 OK와 공지 ID, 처음 읽은 시각이 반환된다") {
+                resultActions
+                    .andExpect(status().isOk)
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.data.noticeId").value(30L))
+                    .andExpect(jsonPath("$.data.readAt").exists())
+                    .andExpect(jsonPath("$.error").doesNotExist())
+            }
+        }
+    }
+
+    Given("공지 읽음 현황 조회 요청(GET .../reads)이 주어졌을 때") {
+        val meetingId = 1L
+        val noticeId = 30L
+        val mockResponse = NoticeReadStatusResponse(
+            noticeId = noticeId,
+            readCount = 1,
+            totalCount = 2,
+            readMembers = listOf(
+                NoticeReadMemberResponse(3L, "김모아", ProfileColor.LIGHT_BLUE, OffsetDateTime.parse("2026-10-07T10:00:00+09:00"))
+            ),
+            unreadMembers = listOf(NoticeUnreadMemberResponse(7L, "박모아", ProfileColor.GRAY))
+        )
+
+        `when`(noticeService.getNoticeReads(meetingId, noticeId, 1L)).thenReturn(mockResponse)
+
+        When("읽음 현황 API를 호출하면") {
+            val resultActions = mockMvc.perform(get("/v1/meetings/$meetingId/notices/$noticeId/reads"))
+
+            Then("200 OK와 읽은 인원·전체 인원·읽은 구성원·안 읽은 구성원이 반환된다") {
+                resultActions
+                    .andExpect(status().isOk)
+                    .andExpect(jsonPath("$.data.noticeId").value(30L))
+                    .andExpect(jsonPath("$.data.readCount").value(1))
+                    .andExpect(jsonPath("$.data.totalCount").value(2))
+                    .andExpect(jsonPath("$.data.readMembers[0].memberId").value(3L))
+                    .andExpect(jsonPath("$.data.readMembers[0].userName").value("김모아"))
+                    .andExpect(jsonPath("$.data.readMembers[0].profileColor").value("LIGHT_BLUE"))
+                    .andExpect(jsonPath("$.data.readMembers[0].readAt").exists())
+                    .andExpect(jsonPath("$.data.unreadMembers[0].memberId").value(7L))
+                    .andExpect(jsonPath("$.data.unreadMembers[0].profileColor").value("GRAY"))
             }
         }
     }

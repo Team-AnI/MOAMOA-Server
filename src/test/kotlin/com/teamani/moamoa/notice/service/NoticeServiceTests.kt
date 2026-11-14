@@ -2,11 +2,16 @@ package com.teamani.moamoa.notice.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeUpdateRequest
 import com.teamani.moamoa.notice.entity.Notice
+import com.teamani.moamoa.notice.entity.NoticeRead
+import com.teamani.moamoa.notice.repository.NoticeReadRepository
 import com.teamani.moamoa.notice.repository.NoticeRepository
 import com.teamani.moamoa.settlement.repository.SettlementRepository
+import com.teamani.moamoa.user.repository.AppUserRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -29,9 +34,17 @@ class NoticeServiceTests : BehaviorSpec({
 
     val noticeRepository: NoticeRepository = mock(NoticeRepository::class.java)
     val settlementRepository: SettlementRepository = mock(SettlementRepository::class.java)
-    val noticeService = NoticeService(noticeRepository, settlementRepository)
+    val noticeReadRepository: NoticeReadRepository = mock(NoticeReadRepository::class.java)
+    val memberService: MemberService = mock(MemberService::class.java)
+    val memberRepository: MemberRepository = mock(MemberRepository::class.java)
+    val appUserRepository: AppUserRepository = mock(AppUserRepository::class.java)
 
-    afterEach { clearInvocations(noticeRepository, settlementRepository) }
+    fun noticeService(repository: NoticeRepository) =
+        NoticeService(repository, settlementRepository, noticeReadRepository, memberService, memberRepository, appUserRepository)
+
+    val noticeService = noticeService(noticeRepository)
+
+    afterEach { clearInvocations(noticeRepository, settlementRepository, noticeReadRepository) }
 
     Given("모임 공지사항 작성 요청 데이터가 주어졌을 때") {
         val meetingId = 1L
@@ -54,11 +67,12 @@ class NoticeServiceTests : BehaviorSpec({
         When("createNotice 메서드를 호출하면") {
             val response = noticeService.createNotice(meetingId, userId, request)
 
-            Then("Notice 엔티티가 영속화되고 올바른 응답 DTO가 반환된다") {
+            Then("Notice 엔티티와 작성자의 읽음 기록이 영속화되고 올바른 응답 DTO가 반환된다") {
                 response.shouldNotBeNull()
                 response.noticeId shouldBe 30L
                 response.title shouldBe "10월 회비 안내"
                 verify(noticeRepository).save(any(Notice::class.java))
+                verify(noticeReadRepository).save(any(NoticeRead::class.java))
             }
         }
     }
@@ -75,16 +89,17 @@ class NoticeServiceTests : BehaviorSpec({
             content = "삭제할 공지 내용"
         )
 
-        `when`(noticeRepository.findById(noticeId)).thenReturn(Optional.of(targetNotice))
+        `when`(noticeRepository.findByIdAndMeetingIdForUpdate(noticeId, meetingId)).thenReturn(targetNotice)
 
         When("deleteNotice 메서드를 호출하면") {
             val response = noticeService.deleteNotice(meetingId, noticeId, userId)
 
-            Then("연결된 정산의 공지 연결을 먼저 해제한 뒤 공지를 삭제하고 noticeId를 반환한다") {
+            Then("연결된 정산의 공지 연결 해제와 읽음 기록 삭제를 먼저 한 뒤 공지를 삭제하고 noticeId를 반환한다") {
                 response.shouldNotBeNull()
                 response.noticeId shouldBe 30L
-                val order = inOrder(settlementRepository, noticeRepository)
+                val order = inOrder(settlementRepository, noticeReadRepository, noticeRepository)
                 order.verify(settlementRepository).clearNoticeId(noticeId)
+                order.verify(noticeReadRepository).deleteAllByNoticeId(noticeId)
                 order.verify(noticeRepository).delete(targetNotice)
             }
         }
@@ -211,7 +226,7 @@ class NoticeServiceTests : BehaviorSpec({
 
     Given("존재하지 않는 공지사항 식별자가 주어졌을 때") {
         val repository: NoticeRepository = mock(NoticeRepository::class.java)
-        val service = NoticeService(repository, settlementRepository)
+        val service = noticeService(repository)
         val meetingId = 1L
         val noticeId = 999L
 
@@ -226,6 +241,7 @@ class NoticeServiceTests : BehaviorSpec({
                 exception.errorCode shouldBe ErrorCode.NOT_FOUND
                 verify(repository, never()).delete(any(Notice::class.java))
                 verify(settlementRepository, never()).clearNoticeId(anyLong())
+                verify(noticeReadRepository, never()).deleteAllByNoticeId(anyLong())
             }
         }
 
@@ -241,7 +257,7 @@ class NoticeServiceTests : BehaviorSpec({
     }
     Given("다른 모임에 속한 공지사항 식별자가 주어졌을 때") {
         val repository: NoticeRepository = mock(NoticeRepository::class.java)
-        val service = NoticeService(repository, settlementRepository)
+        val service = noticeService(repository)
         val noticeId = 30L
         val otherMeetingNotice = Notice(
             id = noticeId,
@@ -262,6 +278,7 @@ class NoticeServiceTests : BehaviorSpec({
                 exception.errorCode shouldBe ErrorCode.NOT_FOUND
                 verify(repository, never()).delete(any(Notice::class.java))
                 verify(settlementRepository, never()).clearNoticeId(anyLong())
+                verify(noticeReadRepository, never()).deleteAllByNoticeId(anyLong())
             }
         }
 

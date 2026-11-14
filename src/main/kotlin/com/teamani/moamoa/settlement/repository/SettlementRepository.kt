@@ -21,6 +21,9 @@ interface SettlementRepository : JpaRepository<Settlement, Long> {
     @Query("update Settlement s set s.noticeId = null where s.noticeId = :noticeId")
     fun clearNoticeId(noticeId: Long): Int
 
+    // 공지 상세에 연결된 정산 표시 (안내 공지는 정산 하나에만 연결됨)
+    fun findFirstByNoticeId(noticeId: Long): Settlement?
+
     // 납부 제출·승인·반려를 정산 단위로 직렬화 (트랜잭션이 끝날 때까지 같은 정산의 다른 요청은 대기)
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from Settlement s where s.id = :id and s.meetingId = :meetingId")
