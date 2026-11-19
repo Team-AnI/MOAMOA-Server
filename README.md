@@ -67,7 +67,13 @@ cp .env.example .env
 - Swagger UI: [http://localhost:8080/swagger-ui/index.html](http://localhost:8080/swagger-ui/index.html)
 - OpenAPI JSON: [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs)
 
-현재 비즈니스 API가 없어 Swagger의 API 목록이 비어 있어도 정상입니다. 종료는 실행한 터미널에서 `Ctrl+C`를 누릅니다.
+자물쇠 표시가 있는 API는 액세스 토큰이 필요합니다. Swagger UI에서 다음 순서로 호출합니다.
+
+1. 회원가입(`POST /v1/users`) 또는 로그인(`POST /v1/auth/login`)을 호출해 응답의 `accessToken` 값을 복사합니다.
+2. 오른쪽 위 **Authorize**를 눌러 `bearerAuth`에 토큰 값만 입력합니다. `Bearer ` 접두어는 Swagger UI가 붙입니다.
+3. 자물쇠 표시가 있는 API를 Try it out으로 호출합니다. 입력한 토큰은 새로고침해도 유지되며, 만료(1시간) 후에는 다시 로그인해 입력합니다.
+
+종료는 실행한 터미널에서 `Ctrl+C`를 누릅니다.
 
 Windows에서는 `./gradlew` 대신 `.\gradlew.bat`을 사용합니다.
 
