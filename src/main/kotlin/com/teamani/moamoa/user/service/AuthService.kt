@@ -24,7 +24,8 @@ class AuthService(
         val password = requireNotNull(request.password) { "비밀번호는 필수입니다." }
 
         // 무엇이 틀렸는지 구분하지 않도록 같은 응답 사용
-        val user = appUserRepository.findByEmail(email)
+        // 사용자를 잠금 조회한 뒤 비밀번호를 확인 (비밀번호 재설정이 진행 중이면 끝난 뒤의 비밀번호로 확인)
+        val user = appUserRepository.findByEmailForUpdate(email)
             ?.takeIf { it.deletedAt == null && passwordEncoder.matches(password, it.password) }
             ?: throw ApiException(ErrorCode.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다.")
 

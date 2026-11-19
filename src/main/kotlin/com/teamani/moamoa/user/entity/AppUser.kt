@@ -61,6 +61,11 @@ class AppUser(
     val id: Long? = null
 ) {
 
+    // 비밀번호 재설정: 암호화한 새 비밀번호로 교체
+    fun changePassword(encodedPassword: String) {
+        password = encodedPassword
+    }
+
     companion object {
         // 동시 가입 충돌 판별에 사용하는 unique 제약 이름
         const val UK_EMAIL = "uk_app_user_email"

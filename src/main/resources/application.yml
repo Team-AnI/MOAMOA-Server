@@ -7,6 +7,21 @@ spring:
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+  # 비밀번호 재설정 메일 발송 (운영 값은 production Environment variable·secret으로 관리)
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
+management:
+  health:
+    # 메일 서버(SMTP) 연결은 헬스 체크에서 제외 (메일 장애가 서버 상태 DOWN·배포 실패로 이어지지 않게, 발송 실패는 로그로 확인)
+    mail:
+      enabled: false
 
 server:
   # Nginx가 전달한 X-Forwarded-* 헤더(/api 접두어·https)를 요청 URL에 반영
@@ -16,6 +31,11 @@ moamoa:
   cors:
     # 쉼표로 구분, 값이 없으면 허용 Origin 없음 (운영 값은 production Environment variable로 관리)
     allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+  password-reset:
+    # 보내는 사람 주소 (Gmail은 계정 주소와 같게)
+    mail-from: ${MAIL_FROM:}
+    # 재설정 웹 페이지 주소, 메일 링크는 {web-url}/reset-password?token={토큰}
+    web-url: ${PASSWORD_RESET_WEB_URL:https://moamoa-sandbox.aandiclub.com}
 
 jwt:
   secret: ${JWT_SECRET}

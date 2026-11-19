@@ -18,6 +18,11 @@ interface AppUserRepository : JpaRepository<AppUser, Long> {
     @Query("select u from AppUser u where u.id = :id")
     fun findByIdForUpdate(id: Long): AppUser?
 
+    // 로그인: 비밀번호 재설정과 같은 사용자 잠금으로 최신 비밀번호를 읽어 확인 (확인 직후 변경된 비밀번호로 발급하지 않음)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from AppUser u where u.email = :email")
+    fun findByEmailForUpdate(email: String): AppUser?
+
     // 기준 시각 이후에 탈퇴한 같은 이메일 해시가 있는지 확인 (재가입 제한)
     fun existsByWithdrawnEmailHashAndDeletedAtAfter(withdrawnEmailHash: String, deletedAt: OffsetDateTime): Boolean
 }

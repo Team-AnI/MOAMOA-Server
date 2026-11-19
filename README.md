@@ -100,6 +100,10 @@ Copy-Item .env.example .env
 | `DB_PASSWORD` | DB 비밀번호 | 실제 DB 비밀번호 |
 | `JWT_SECRET` | JWT 서명 키 (32바이트 이상) | 임의의 긴 문자열 |
 | `CORS_ALLOWED_ORIGINS` | CORS 허용 웹 프론트엔드 Origin (쉼표로 구분, 선택) | `http://localhost:3000` |
+| `MAIL_HOST` · `MAIL_PORT` | 비밀번호 재설정 메일 SMTP 서버 (선택) | `smtp.gmail.com` · `587` |
+| `MAIL_USERNAME` · `MAIL_PASSWORD` | SMTP 계정과 비밀번호 (Gmail은 앱 비밀번호, 선택) | 팀 공용 Gmail 주소 · 앱 비밀번호 |
+| `MAIL_FROM` | 보내는 사람 주소 (Gmail은 계정 주소와 같게, 선택) | 팀 공용 Gmail 주소 |
+| `PASSWORD_RESET_WEB_URL` | 재설정 링크가 열 웹 주소 (기본값 sandbox 웹) | `https://moamoa-sandbox.aandiclub.com` |
 
 `application.yml`은 실행 작업 디렉터리의 `.env`를 Java Properties 형식으로 읽습니다. 저장소 루트에서 실행하고, IntelliJ 실행 설정의 Working directory도 저장소 루트로 지정합니다.
 
@@ -112,6 +116,7 @@ Copy-Item .env.example .env
 - 운영 서버의 `JWT_SECRET`은 GitHub `production` Environment secret `PROD_JWT_SECRET`으로 관리하며, 배포 워크플로가 `JWT_SECRET`으로 전달합니다.
 - `CORS_ALLOWED_ORIGINS`는 브라우저에서 다른 도메인의 웹 프론트엔드가 API를 호출할 때만 필요합니다. 비워 두면 허용 Origin이 없어 브라우저의 교차 출처 요청은 거부되고, 앱과 Swagger UI는 영향이 없습니다.
 - 운영 서버의 `CORS_ALLOWED_ORIGINS`는 GitHub `production` Environment variable `PROD_CORS_ALLOWED_ORIGINS`로 관리하며, 값이 없으면 배포가 중단됩니다.
+- 메일 변수는 비밀번호 재설정(7-5)에만 쓰입니다. 비워 두어도 서버는 시작되며, 재설정 메일 발송만 실패해 로그에 남습니다. `MAIL_PASSWORD`는 Git에 커밋하지 않습니다.
 - `./gradlew test`는 테스트 전용 H2 설정을 사용하므로 `.env`와 PostgreSQL 서버 없이 실행할 수 있습니다.
 
 ### 2. 작업 흐름

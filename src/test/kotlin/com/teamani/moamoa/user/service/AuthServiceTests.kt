@@ -45,7 +45,7 @@ class AuthServiceTests : BehaviorSpec({
     Given("가입된 이메일과 맞는 비밀번호로 로그인 요청이 주어졌을 때") {
         When("이메일을 대문자가 섞인 채로 보내도") {
             Then("소문자로 바꿔 조회하고 토큰을 발급한다") {
-                `when`(appUserRepository.findByEmail("moa@example.com")).thenReturn(user())
+                `when`(appUserRepository.findByEmailForUpdate("moa@example.com")).thenReturn(user())
 
                 val response = authService.login(LoginRequest(email = "MOA@Example.com", password = "moamoa1234"))
 
@@ -59,7 +59,7 @@ class AuthServiceTests : BehaviorSpec({
     Given("로그인할 수 없는 요청이 주어졌을 때") {
         When("비밀번호가 틀리면") {
             Then("401 UNAUTHORIZED이고 토큰을 발급하지 않는다") {
-                `when`(appUserRepository.findByEmail("moa@example.com")).thenReturn(user())
+                `when`(appUserRepository.findByEmailForUpdate("moa@example.com")).thenReturn(user())
 
                 val exception = shouldThrow<ApiException> {
                     authService.login(LoginRequest(email = "moa@example.com", password = "wrong-password"))
@@ -84,7 +84,7 @@ class AuthServiceTests : BehaviorSpec({
 
         When("탈퇴한 계정이면 비밀번호가 맞아도") {
             Then("401 UNAUTHORIZED이고 토큰을 발급하지 않는다") {
-                `when`(appUserRepository.findByEmail("moa@example.com"))
+                `when`(appUserRepository.findByEmailForUpdate("moa@example.com"))
                     .thenReturn(user(deletedAt = OffsetDateTime.parse("2026-11-02T10:00:00+09:00")))
 
                 val exception = shouldThrow<ApiException> {

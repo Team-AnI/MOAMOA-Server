@@ -21,4 +21,9 @@ interface RefreshTokenRepository : JpaRepository<RefreshToken, Long> {
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("delete from RefreshToken r where r.tokenHash = :tokenHash and r.userId = :userId")
     fun deleteByTokenHashAndUserId(tokenHash: String, userId: Long): Int
+
+    // 비밀번호 재설정: 해당 사용자의 모든 기기 토큰 삭제 (잠근 사용자 엔티티가 계속 관리되도록 영속성 컨텍스트는 비우지 않음)
+    @Modifying(flushAutomatically = true)
+    @Query("delete from RefreshToken r where r.userId = :userId")
+    fun deleteAllByUserId(userId: Long): Int
 }
