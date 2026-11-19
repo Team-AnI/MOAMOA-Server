@@ -79,7 +79,7 @@ class SettlementService(
 
         // 공지 생성에 실패하면 같은 트랜잭션이라 정산도 함께 롤백됨
         if (request.postNotice == true) {
-            val notice = noticeService.createNotice(
+            val notice = noticeService.createNoticeByMember(
                 meetingId,
                 memberId,
                 settlementNotice(settlement, totalAmount / memberIds.size)

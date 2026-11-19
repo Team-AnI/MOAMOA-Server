@@ -1,5 +1,6 @@
 package com.teamani.moamoa.notice.controller
 
+import com.teamani.moamoa.global.auth.JwtTokenProvider
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.notice.dto.NoticeListResponse
@@ -11,6 +12,7 @@ import io.kotest.extensions.spring.SpringExtension
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
@@ -30,7 +32,14 @@ class NoticeControllerWebMvcTests : BehaviorSpec() {
     @MockitoBean
     lateinit var noticeService: NoticeService
 
+    @MockitoBean
+    lateinit var jwtTokenProvider: JwtTokenProvider
+
     init {
+        beforeTest {
+            `when`(jwtTokenProvider.getUserId(ACCESS_TOKEN)).thenReturn(1L)
+        }
+
         Given("허용 범위를 벗어난 페이징 파라미터로 목록 조회 요청이 주어졌을 때") {
             val invalidParams = mapOf(
                 "page=-1" to ("page" to "-1"),
@@ -42,6 +51,7 @@ class NoticeControllerWebMvcTests : BehaviorSpec() {
                 When("$case 로 목록 조회 API를 호출하면") {
                     Then("400 Bad Request와 VALIDATION_ERROR 공통 오류 응답을 반환한다") {
                         mockMvc.get("/v1/meetings/1/notices") {
+                            header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                             param(param.first, param.second)
                         }.andExpect {
                             status { isBadRequest() }
@@ -60,7 +70,9 @@ class NoticeControllerWebMvcTests : BehaviorSpec() {
                         NoticeListResponse(notices = emptyList(), page = 0, size = 20, hasNext = false)
                     )
 
-                    mockMvc.get("/v1/meetings/1/notices").andExpect {
+                    mockMvc.get("/v1/meetings/1/notices") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.page") { value(0) }
                         jsonPath("$.data.size") { value(20) }
@@ -76,6 +88,7 @@ class NoticeControllerWebMvcTests : BehaviorSpec() {
                         .thenReturn(NoticeUpdateResponse(noticeId = 30L, title = "수정된 제목", content = "기존 내용"))
 
                     mockMvc.patch("/v1/meetings/1/notices/30") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{ "title": "수정된 제목" }"""
                     }.andExpect {
@@ -96,6 +109,7 @@ class NoticeControllerWebMvcTests : BehaviorSpec() {
                         .thenReturn(NoticeUpdateResponse(noticeId = 30L, title = "기존 제목", content = "수정된 내용"))
 
                     mockMvc.patch("/v1/meetings/1/notices/30") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{ "content": "수정된 내용" }"""
                     }.andExpect {
@@ -112,6 +126,7 @@ class NoticeControllerWebMvcTests : BehaviorSpec() {
                         .thenReturn(NoticeUpdateResponse(noticeId = 30L, title = "기존 제목", content = "기존 내용"))
 
                     mockMvc.patch("/v1/meetings/1/notices/30") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = "{}"
                     }.andExpect {
@@ -136,6 +151,7 @@ class NoticeControllerWebMvcTests : BehaviorSpec() {
                 When("$case 으로 수정 API를 호출하면") {
                     Then("400 Bad Request와 VALIDATION_ERROR 공통 오류 응답을 반환한다") {
                         mockMvc.patch("/v1/meetings/1/notices/30") {
+                            header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                             contentType = MediaType.APPLICATION_JSON
                             content = requestJson
                         }.andExpect {
@@ -155,6 +171,7 @@ class NoticeControllerWebMvcTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.NOT_FOUND, "공지사항을 찾을 수 없습니다."))
 
                     mockMvc.patch("/v1/meetings/1/notices/999") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{ "title": "수정된 제목" }"""
                     }.andExpect {
@@ -166,5 +183,11 @@ class NoticeControllerWebMvcTests : BehaviorSpec() {
                 }
             }
         }
+    }
+
+    companion object {
+        // 토큰 검증은 mock으로 대체: ACCESS_TOKEN을 보내면 사용자 1로 인증
+        private const val ACCESS_TOKEN = "test-access-token"
+        private const val BEARER_TOKEN = "Bearer $ACCESS_TOKEN"
     }
 }

@@ -2,6 +2,7 @@ package com.teamani.moamoa.settlement.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.settlement.dto.RegularDuesCreateRequest
 import com.teamani.moamoa.settlement.dto.RegularDuesUpdateRequest
 import com.teamani.moamoa.settlement.entity.CycleType
@@ -27,7 +28,8 @@ class RegularDuesServiceTests : BehaviorSpec({
 
     val regularDuesRepository: RegularDuesRepository = mock(RegularDuesRepository::class.java)
     val settlementRepository: SettlementRepository = mock(SettlementRepository::class.java)
-    val regularDuesService = RegularDuesService(regularDuesRepository, settlementRepository)
+    val memberRepository: MemberRepository = mock(MemberRepository::class.java)
+    val regularDuesService = RegularDuesService(regularDuesRepository, settlementRepository, memberRepository)
 
     afterEach { clearInvocations(regularDuesRepository, settlementRepository) }
 
@@ -155,7 +157,7 @@ class RegularDuesServiceTests : BehaviorSpec({
 
     Given("일부 필드만 담은 정기 회비 수정 요청이 주어졌을 때") {
         val entity = regularDues()
-        `when`(regularDuesRepository.findByIdAndMeetingId(7L, 1L)).thenReturn(entity)
+        `when`(regularDuesRepository.findByIdAndMeetingIdForUpdate(7L, 1L)).thenReturn(entity)
 
         When("금액과 활성화 여부만 보내면") {
             val response = regularDuesService.updateRegularDues(
@@ -175,17 +177,33 @@ class RegularDuesServiceTests : BehaviorSpec({
     }
 
     Given("반복 주기를 바꾸는 수정 요청이 주어졌을 때") {
-        `when`(regularDuesRepository.findByIdAndMeetingId(7L, 1L)).thenReturn(regularDues())
+        val entity = regularDues()
+        `when`(regularDuesRepository.findByIdAndMeetingIdForUpdate(7L, 1L)).thenReturn(entity)
 
-        When("반복 주기와 지정일을 함께 보내면") {
+        When("다른 반복 주기(MONTHLY → WEEKLY)와 지정일을 함께 보내면") {
+            val exception = shouldThrow<ApiException> {
+                regularDuesService.updateRegularDues(
+                    1L, 1L, 7L,
+                    RegularDuesUpdateRequest(cycleType = Optional.of("WEEKLY"), cycleDay = Optional.of("MON"))
+                )
+            }
+
+            Then("반복 주기는 바꿀 수 없어 VALIDATION_ERROR이고 기존 설정이 유지된다") {
+                exception.errorCode shouldBe ErrorCode.VALIDATION_ERROR
+                entity.cycleType shouldBe CycleType.MONTHLY
+                entity.cycleDay shouldBe "10"
+            }
+        }
+
+        When("같은 반복 주기와 다른 지정일을 함께 보내면") {
             val response = regularDuesService.updateRegularDues(
                 1L, 1L, 7L,
-                RegularDuesUpdateRequest(cycleType = Optional.of("WEEKLY"), cycleDay = Optional.of("MON"))
+                RegularDuesUpdateRequest(cycleType = Optional.of("MONTHLY"), cycleDay = Optional.of("20"))
             )
 
-            Then("반복 설정이 바뀐다") {
-                response.cycleType shouldBe CycleType.WEEKLY
-                response.cycleDay shouldBe "MON"
+            Then("지정일만 바뀐다") {
+                response.cycleType shouldBe CycleType.MONTHLY
+                response.cycleDay shouldBe "20"
             }
         }
 
@@ -204,7 +222,7 @@ class RegularDuesServiceTests : BehaviorSpec({
     }
 
     Given("지정일만 담은 수정 요청이 주어졌을 때") {
-        `when`(regularDuesRepository.findByIdAndMeetingId(7L, 1L)).thenReturn(regularDues())
+        `when`(regularDuesRepository.findByIdAndMeetingIdForUpdate(7L, 1L)).thenReturn(regularDues())
 
         When("기존 반복 주기(MONTHLY)에 맞는 지정일을 보내면") {
             val response = regularDuesService.updateRegularDues(
@@ -231,9 +249,55 @@ class RegularDuesServiceTests : BehaviorSpec({
         }
     }
 
+    Given("1인당 금액 × 지금 구성원 수가 정산 총액 최대값을 넘을 때") {
+        // 1인당 500만 원 × 430명 = 21.5억 > 2,147,483,647원
+        `when`(memberRepository.countByMeetingId(1L)).thenReturn(430L)
+        val entity = regularDues()
+        `when`(regularDuesRepository.findByIdAndMeetingIdForUpdate(7L, 1L)).thenReturn(entity)
+
+        When("등록하면") {
+            val exception = shouldThrow<ApiException> {
+                regularDuesService.createRegularDues(1L, 1L, createRequest().copy(amount = 5_000_000))
+            }
+
+            Then("VALIDATION_ERROR이고 저장하지 않는다") {
+                exception.errorCode shouldBe ErrorCode.VALIDATION_ERROR
+                verify(regularDuesRepository, never()).save(any(RegularDues::class.java))
+            }
+        }
+
+        When("금액을 수정하면") {
+            val exception = shouldThrow<ApiException> {
+                regularDuesService.updateRegularDues(1L, 1L, 7L, RegularDuesUpdateRequest(amount = Optional.of(5_000_000)))
+            }
+
+            Then("VALIDATION_ERROR이고 기존 금액이 유지된다") {
+                exception.errorCode shouldBe ErrorCode.VALIDATION_ERROR
+                entity.amount shouldBe 10000
+            }
+        }
+
+        When("총액이 최대값과 같으면") {
+            // 4,994,148원 × 430명 = 2,147,483,640원 (최대값 이하)
+            val response = regularDuesService.updateRegularDues(1L, 1L, 7L, RegularDuesUpdateRequest(amount = Optional.of(4_994_148)))
+
+            Then("수정된다") {
+                response.amount shouldBe 4_994_148
+            }
+        }
+
+        When("금액 없이 다른 항목만 수정하면") {
+            val response = regularDuesService.updateRegularDues(1L, 1L, 7L, RegularDuesUpdateRequest(title = Optional.of("새 회비")))
+
+            Then("총액을 다시 검사하지 않고 수정된다") {
+                response.title shouldBe "새 회비"
+            }
+        }
+    }
+
     Given("필수 항목을 null로 보낸 수정 요청이 주어졌을 때") {
         val entity = regularDues()
-        `when`(regularDuesRepository.findByIdAndMeetingId(7L, 1L)).thenReturn(entity)
+        `when`(regularDuesRepository.findByIdAndMeetingIdForUpdate(7L, 1L)).thenReturn(entity)
 
         val clearedRequests = mapOf(
             "title" to RegularDuesUpdateRequest(title = Optional.empty()),
@@ -260,7 +324,7 @@ class RegularDuesServiceTests : BehaviorSpec({
     }
 
     Given("없거나 다른 모임에 속한 정기 회비가 주어졌을 때") {
-        `when`(regularDuesRepository.findByIdAndMeetingId(999L, 1L)).thenReturn(null)
+        `when`(regularDuesRepository.findByIdAndMeetingIdForUpdate(999L, 1L)).thenReturn(null)
 
         When("updateRegularDues 메서드를 호출하면") {
             val exception = shouldThrow<ApiException> {
@@ -286,7 +350,7 @@ class RegularDuesServiceTests : BehaviorSpec({
 
     Given("삭제할 정기 회비가 있을 때") {
         val entity = regularDues()
-        `when`(regularDuesRepository.findByIdAndMeetingId(7L, 1L)).thenReturn(entity)
+        `when`(regularDuesRepository.findByIdAndMeetingIdForUpdate(7L, 1L)).thenReturn(entity)
 
         When("deleteRegularDues 메서드를 호출하면") {
             val response = regularDuesService.deleteRegularDues(1L, 1L, 7L)

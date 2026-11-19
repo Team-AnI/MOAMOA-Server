@@ -1,5 +1,6 @@
 package com.teamani.moamoa.schedule.controller
 
+import com.teamani.moamoa.global.auth.CurrentUserId
 import com.teamani.moamoa.global.response.CommonResponse
 import com.teamani.moamoa.schedule.dto.ScheduleCreateRequest
 import com.teamani.moamoa.schedule.dto.ScheduleCreateResponse
@@ -31,11 +32,10 @@ class ScheduleController(
 
     @PostMapping
     fun createSchedule(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @Valid @RequestBody request: ScheduleCreateRequest
     ): ResponseEntity<CommonResponse<ScheduleCreateResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: ScheduleCreateResponse = scheduleService.createSchedule(meetingId, currentUserId, request)
 
         return ResponseEntity.status(HttpStatus.CREATED).body(CommonResponse(data = response))
@@ -43,12 +43,11 @@ class ScheduleController(
 
     @GetMapping
     fun getSchedules(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) from: LocalDate,
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) to: LocalDate
     ): ResponseEntity<CommonResponse<ScheduleListResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: ScheduleListResponse = scheduleService.getSchedules(meetingId, currentUserId, from, to)
 
         return ResponseEntity.ok(CommonResponse(data = response))
@@ -56,11 +55,10 @@ class ScheduleController(
 
     @GetMapping("/{scheduleId}")
     fun getSchedule(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @PathVariable scheduleId: Long
     ): ResponseEntity<CommonResponse<ScheduleDetailResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: ScheduleDetailResponse = scheduleService.getSchedule(meetingId, currentUserId, scheduleId)
 
         return ResponseEntity.ok(CommonResponse(data = response))
@@ -68,12 +66,11 @@ class ScheduleController(
 
     @PatchMapping("/{scheduleId}")
     fun updateSchedule(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @PathVariable scheduleId: Long,
         @Valid @RequestBody request: ScheduleUpdateRequest
     ): ResponseEntity<CommonResponse<ScheduleDetailResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: ScheduleDetailResponse =
             scheduleService.updateSchedule(meetingId, currentUserId, scheduleId, request)
 
@@ -82,11 +79,10 @@ class ScheduleController(
 
     @DeleteMapping("/{scheduleId}")
     fun deleteSchedule(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @PathVariable scheduleId: Long
     ): ResponseEntity<CommonResponse<ScheduleDeleteResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: ScheduleDeleteResponse = scheduleService.deleteSchedule(meetingId, currentUserId, scheduleId)
 
         return ResponseEntity.ok(CommonResponse(data = response))

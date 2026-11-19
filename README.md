@@ -56,7 +56,7 @@ git remote add upstream https://github.com/Team-AnI/MOAMOA-Server.git
 
 # 로컬 PostgreSQL 서버와 moamoa DB를 준비한 뒤 접속 정보 설정
 cp .env.example .env
-# .env의 DB_URL, DB_USERNAME, DB_PASSWORD를 실제 접속 정보로 수정
+# .env의 DB_URL, DB_USERNAME, DB_PASSWORD를 실제 접속 정보로, JWT_SECRET을 임의 문자열로 수정
 
 # 애플리케이션 실행
 ./gradlew bootRun
@@ -91,21 +91,27 @@ Copy-Item .env.example .env
 
 #### 1-5. 환경 변수 및 민감 정보
 
-서버 실행에는 다음 DB 설정이 필요합니다. 로컬 개발에서는 `.env.example`을 저장소 루트의 `.env`로 복사하고 실제 접속 정보로 수정합니다. 예제 비밀번호 `change-me`는 실제 DB 비밀번호로 바꿔야 합니다.
+서버 실행에는 다음 DB·JWT 설정이 필요합니다. 로컬 개발에서는 `.env.example`을 저장소 루트의 `.env`로 복사하고 실제 접속 정보로 수정합니다. 예제 비밀번호 `change-me`는 실제 DB 비밀번호로 바꿔야 합니다.
 
 | 변수 | 용도 | 예시 |
 | --- | --- | --- |
 | `DB_URL` | PostgreSQL JDBC 접속 URL | `jdbc:postgresql://localhost:5432/moamoa` |
 | `DB_USERNAME` | DB 사용자 이름 | `postgres` |
 | `DB_PASSWORD` | DB 비밀번호 | 실제 DB 비밀번호 |
+| `JWT_SECRET` | JWT 서명 키 (32바이트 이상) | 임의의 긴 문자열 |
+| `CORS_ALLOWED_ORIGINS` | CORS 허용 웹 프론트엔드 Origin (쉼표로 구분, 선택) | `http://localhost:3000` |
 
 `application.yml`은 실행 작업 디렉터리의 `.env`를 Java Properties 형식으로 읽습니다. 저장소 루트에서 실행하고, IntelliJ 실행 설정의 Working directory도 저장소 루트로 지정합니다.
 
 - 비밀번호, API Key, Access Token, Secret Key 등 민감 정보는 Git에 커밋하지 않습니다.
 - `.env`는 Git에서 제외하고, 실제 비밀값이 없는 `.env.example`만 공유합니다.
 - 파일은 `KEY=value` 형식을 사용합니다. `export`나 값을 감싸는 따옴표를 사용하지 않습니다. 따옴표는 값에 포함되며, 리터럴 역슬래시는 `\\`로 작성합니다.
-- OS 환경변수로 주입한 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`는 `.env` 값보다 우선합니다. 배포 환경에서는 `.env` 없이 환경변수로 설정할 수 있습니다.
-- DB 설정에 기본값은 없습니다. `.env` 파일 자체는 선택 사항이지만, 서버 실행 시 세 변수는 모두 제공해야 합니다.
+- OS 환경변수로 주입한 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`은 `.env` 값보다 우선합니다. 배포 환경에서는 `.env` 없이 환경변수로 설정할 수 있습니다.
+- DB·JWT 설정에 기본값은 없습니다. `.env` 파일 자체는 선택 사항이지만, 서버 실행 시 네 변수는 모두 제공해야 합니다.
+- `JWT_SECRET`이 32바이트보다 짧으면 서버가 시작되지 않습니다. PC마다 임의 문자열을 만들어 각자의 `.env`에 넣고, 다른 사람과 공유하지 않습니다.
+- 운영 서버의 `JWT_SECRET`은 GitHub `production` Environment secret `PROD_JWT_SECRET`으로 관리하며, 배포 워크플로가 `JWT_SECRET`으로 전달합니다.
+- `CORS_ALLOWED_ORIGINS`는 브라우저에서 다른 도메인의 웹 프론트엔드가 API를 호출할 때만 필요합니다. 비워 두면 허용 Origin이 없어 브라우저의 교차 출처 요청은 거부되고, 앱과 Swagger UI는 영향이 없습니다.
+- 운영 서버의 `CORS_ALLOWED_ORIGINS`는 GitHub `production` Environment variable `PROD_CORS_ALLOWED_ORIGINS`로 관리하며, 값이 없으면 배포가 중단됩니다.
 - `./gradlew test`는 테스트 전용 H2 설정을 사용하므로 `.env`와 PostgreSQL 서버 없이 실행할 수 있습니다.
 
 ### 2. 작업 흐름

@@ -66,10 +66,10 @@ data class VoteParticipationResponse(
     val members: List<VoteMemberResponse>
 )
 
-// nickname은 User 도메인 구현 전까지 null 반환
+// userName은 User 도메인 구현 전까지 null 반환
 data class VoteMemberResponse(
     val memberId: Long,
-    val nickname: String?,
+    val userName: String?,
     val responded: Boolean,
     val submittedAt: OffsetDateTime?
 )

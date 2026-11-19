@@ -330,7 +330,7 @@ class VoteControllerTests : BehaviorSpec() {
 
         Given("투표 참여 현황 조회 요청(GET /v1/meetings/{meetingId}/schedules/{scheduleId}/vote-responses)이 주어졌을 때") {
             When("ADMIN이 요청하면") {
-                Then("200과 구성원별 응답 여부를 반환하고 nickname과 미응답자의 submittedAt은 null로 응답한다") {
+                Then("200과 구성원별 응답 여부를 반환하고 userName과 미응답자의 submittedAt은 null로 응답한다") {
                     `when`(voteService.getVoteParticipation(1L, USER_ID, 5L)).thenReturn(
                         VoteParticipationResponse(
                             memberCount = 2L,
@@ -347,7 +347,7 @@ class VoteControllerTests : BehaviorSpec() {
                         jsonPath("$.data.memberCount") { value(2) }
                         jsonPath("$.data.respondedCount") { value(1) }
                         jsonPath("$.data.members[0].memberId") { value(100) }
-                        jsonPath("$.data.members[0].nickname") { value(null as Any?) }
+                        jsonPath("$.data.members[0].userName") { value(null as Any?) }
                         jsonPath("$.data.members[0].responded") { value(false) }
                         jsonPath("$.data.members[0].submittedAt") { value(null as Any?) }
                         jsonPath("$.data.members[1].responded") { value(true) }

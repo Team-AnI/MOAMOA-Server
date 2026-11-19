@@ -13,6 +13,7 @@ import com.teamani.moamoa.member.entity.Member
 import com.teamani.moamoa.member.entity.MemberRole
 import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.member.service.MemberService
+import com.teamani.moamoa.notice.repository.NoticeReadRepository
 import com.teamani.moamoa.schedule.entity.Schedule
 import com.teamani.moamoa.schedule.entity.ScheduleStatus
 import com.teamani.moamoa.schedule.repository.ScheduleRepository
@@ -43,7 +44,7 @@ class AttendanceServiceTests : BehaviorSpec({
     val memberRepository: MemberRepository = mock(MemberRepository::class.java)
     val scheduleRepository: ScheduleRepository = mock(ScheduleRepository::class.java)
     val attendanceRepository: AttendanceRepository = mock(AttendanceRepository::class.java)
-    val memberService = MemberService(meetingRepository, memberRepository, mock(VoteRepository::class.java), attendanceRepository)
+    val memberService = MemberService(meetingRepository, memberRepository, mock(VoteRepository::class.java), attendanceRepository, mock(NoticeReadRepository::class.java))
     val attendanceService = AttendanceService(memberService, memberRepository, scheduleRepository, attendanceRepository)
 
     val meetingId = 1L
@@ -74,6 +75,7 @@ class AttendanceServiceTests : BehaviorSpec({
 
     fun stubSchedule(schedule: Schedule?, attendances: List<Attendance> = emptyList()) {
         `when`(scheduleRepository.findByIdAndMeetingId(scheduleId, meetingId)).thenReturn(schedule)
+        `when`(scheduleRepository.findByIdAndMeetingIdForUpdate(scheduleId, meetingId)).thenReturn(schedule)
         `when`(attendanceRepository.findAllByScheduleId(scheduleId)).thenReturn(attendances)
     }
 
@@ -174,7 +176,7 @@ class AttendanceServiceTests : BehaviorSpec({
                 shouldThrow<ApiException> {
                     attendanceService.updateAttendances(meetingId, adminUserId, scheduleId, request(200L to "PRESENT"))
                 }.errorCode shouldBe ErrorCode.NOT_FOUND
-                verify(scheduleRepository, never()).findByIdAndMeetingId(anyLong(), anyLong())
+                verify(scheduleRepository, never()).findByIdAndMeetingIdForUpdate(anyLong(), anyLong())
             }
         }
         When("일정이 없거나 다른 모임의 일정이면") {
@@ -297,7 +299,7 @@ class AttendanceServiceTests : BehaviorSpec({
                 response.attendances.map { it.memberId } shouldContainExactly listOf(100L, 200L, 300L)
                 response.attendances.map { it.status } shouldContainExactly
                     listOf(AttendanceViewStatus.PRESENT, AttendanceViewStatus.LATE, AttendanceViewStatus.UNCHECKED)
-                response.attendances.map { it.nickname } shouldContainExactly listOf(null, null, null)
+                response.attendances.map { it.userName } shouldContainExactly listOf(null, null, null)
             }
         }
         When("결석으로 체크된 구성원이 있으면") {

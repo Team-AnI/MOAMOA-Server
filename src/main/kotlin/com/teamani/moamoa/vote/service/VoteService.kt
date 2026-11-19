@@ -191,7 +191,7 @@ class VoteService(
             val submittedAt = submittedAtByMemberId[memberId]
             VoteMemberResponse(
                 memberId = memberId,
-                nickname = null,
+                userName = null,
                 responded = submittedAt != null,
                 submittedAt = submittedAt?.withOffsetSameInstant(KST)
             )

@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import java.time.LocalTime
+import java.time.OffsetDateTime
 
 // 정기 회비 설정 (스케줄러가 이 설정으로 회차마다 정산을 생성)
 @Entity
@@ -64,6 +65,9 @@ class RegularDues(
     // 회차마다 납부 안내 공지 자동 발행 여부
     @Column(nullable = false)
     var postNotice: Boolean = false,
+
+    // 등록 일시 (첫 회차 판단용, 컬럼 추가 전에 등록된 설정은 NULL)
+    val createdAt: OffsetDateTime? = OffsetDateTime.now(),
 
     // 기본 키 (PK)
     @Id

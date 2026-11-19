@@ -142,6 +142,46 @@ class RegularDuesControllerTests : BehaviorSpec() {
             }
         }
 
+        Given("1인당 금액이 상한(5,000,000원)인 정기 회비 등록 요청이 주어졌을 때") {
+            val request = RegularDuesCreateRequest(
+                title = "월 회비",
+                amount = 5_000_000,
+                cycleType = "MONTHLY",
+                cycleDay = "10",
+                dueDays = 7,
+                bankName = "국민은행",
+                accountNumber = "123456789012",
+                accountHolder = "김모아"
+            )
+
+            When("API를 호출하면") {
+                Then("검증을 통과해 201 Created를 반환한다") {
+                    `when`(regularDuesService.createRegularDues(1L, 1L, request)).thenReturn(
+                        RegularDuesCreateResponse(regularDuesId = 9L, title = "월 회비", isActive = true)
+                    )
+
+                    mockMvc.post("/v1/meetings/1/regular-dues") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """
+                            {
+                              "title": "월 회비",
+                              "amount": 5000000,
+                              "cycleType": "MONTHLY",
+                              "cycleDay": "10",
+                              "dueDays": 7,
+                              "bankName": "국민은행",
+                              "accountNumber": "123456789012",
+                              "accountHolder": "김모아"
+                            }
+                        """.trimIndent()
+                    }.andExpect {
+                        status { isCreated() }
+                        jsonPath("$.data.regularDuesId") { value(9) }
+                    }
+                }
+            }
+        }
+
         Given("필수값이 누락되었거나 잘못된 정기 회비 등록 요청이 주어졌을 때") {
             val valid = mapOf(
                 "title" to "\"월 회비\"",
@@ -160,6 +200,7 @@ class RegularDuesControllerTests : BehaviorSpec() {
                 "공백 title" to json(valid + ("title" to "\"   \"")),
                 "50자 초과 title" to json(valid + ("title" to "\"${"가".repeat(51)}\"")),
                 "amount 0" to json(valid + ("amount" to "0")),
+                "상한(5,000,000원) 초과 amount" to json(valid + ("amount" to "5000001")),
                 "cycleType 누락" to json(valid - "cycleType"),
                 "잘못된 cycleType" to json(valid + ("cycleType" to "\"DAILY\"")),
                 "cycleDay 누락" to json(valid - "cycleDay"),
@@ -247,6 +288,7 @@ class RegularDuesControllerTests : BehaviorSpec() {
                 "공백 title" to """{ "title": "   " }""",
                 "50자 초과 title" to """{ "title": "${"가".repeat(51)}" }""",
                 "amount 0" to """{ "amount": 0 }""",
+                "상한(5,000,000원) 초과 amount" to """{ "amount": 5000001 }""",
                 "잘못된 cycleType" to """{ "cycleType": "DAILY", "cycleDay": "MON" }""",
                 "잘못된 sendTime" to """{ "sendTime": "25:00" }""",
                 "음수 dueDays" to """{ "dueDays": -1 }"""

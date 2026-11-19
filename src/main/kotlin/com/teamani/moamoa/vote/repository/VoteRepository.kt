@@ -23,4 +23,9 @@ interface VoteRepository : JpaRepository<Vote, Long> {
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("delete from Vote v where v.memberId = :memberId")
     fun deleteAllByMemberId(@Param("memberId") memberId: Long): Int
+
+    // 일정 삭제 시 해당 일정의 모든 투표 응답 일괄 삭제 (영속성 컨텍스트 동기화는 위와 같음)
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("delete from Vote v where v.scheduleId = :scheduleId")
+    fun deleteAllByScheduleId(@Param("scheduleId") scheduleId: Long): Int
 }

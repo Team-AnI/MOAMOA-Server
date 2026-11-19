@@ -1,6 +1,7 @@
 package com.teamani.moamoa.vote
 
 import com.jayway.jsonpath.JsonPath
+import com.teamani.moamoa.global.auth.JwtTokenProvider
 import com.teamani.moamoa.meeting.entity.Meeting
 import com.teamani.moamoa.meeting.repository.MeetingRepository
 import com.teamani.moamoa.member.entity.Member
@@ -22,6 +23,7 @@ import io.kotest.matchers.shouldBe
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.MockMvc
@@ -44,6 +46,9 @@ class VoteIntegrationTests : BehaviorSpec() {
 
     @Autowired
     lateinit var mockMvc: MockMvc
+
+    @Autowired
+    lateinit var jwtTokenProvider: JwtTokenProvider
 
     @Autowired
     lateinit var meetingRepository: MeetingRepository
@@ -258,7 +263,9 @@ class VoteIntegrationTests : BehaviorSpec() {
                         )
                     )
 
-                    mockMvc.delete("/v1/meetings/$meetingId/members/me").andExpect {
+                    mockMvc.delete("/v1/meetings/$meetingId/members/me") {
+                        header(HttpHeaders.AUTHORIZATION, "Bearer ${jwtTokenProvider.createAccessToken(USER_ID)}")
+                    }.andExpect {
                         status { isOk() }
                     }
 

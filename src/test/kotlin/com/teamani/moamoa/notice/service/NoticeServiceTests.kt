@@ -2,15 +2,25 @@ package com.teamani.moamoa.notice.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.member.entity.Member
+import com.teamani.moamoa.member.entity.MemberRole
+import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeUpdateRequest
 import com.teamani.moamoa.notice.entity.Notice
+import com.teamani.moamoa.notice.entity.NoticeRead
+import com.teamani.moamoa.notice.repository.NoticeReadRepository
 import com.teamani.moamoa.notice.repository.NoticeRepository
 import com.teamani.moamoa.settlement.repository.SettlementRepository
+import com.teamani.moamoa.user.entity.AppUser
+import com.teamani.moamoa.user.entity.ProfileColor
+import com.teamani.moamoa.user.repository.AppUserRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.Mockito.`when`
@@ -19,6 +29,7 @@ import org.mockito.Mockito.inOrder
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -29,13 +40,24 @@ class NoticeServiceTests : BehaviorSpec({
 
     val noticeRepository: NoticeRepository = mock(NoticeRepository::class.java)
     val settlementRepository: SettlementRepository = mock(SettlementRepository::class.java)
-    val noticeService = NoticeService(noticeRepository, settlementRepository)
+    val noticeReadRepository: NoticeReadRepository = mock(NoticeReadRepository::class.java)
+    val memberService: MemberService = mock(MemberService::class.java)
+    val memberRepository: MemberRepository = mock(MemberRepository::class.java)
+    val appUserRepository: AppUserRepository = mock(AppUserRepository::class.java)
 
-    afterEach { clearInvocations(noticeRepository, settlementRepository) }
+    fun noticeService(repository: NoticeRepository) =
+        NoticeService(repository, settlementRepository, noticeReadRepository, memberService, memberRepository, appUserRepository)
+
+    val noticeService = noticeService(noticeRepository)
+
+    afterEach { clearInvocations(noticeRepository, settlementRepository, noticeReadRepository, memberService) }
 
     Given("모임 공지사항 작성 요청 데이터가 주어졌을 때") {
         val meetingId = 1L
         val userId = 1L
+        val adminMemberId = 3L
+        `when`(memberService.validateAdmin(meetingId, userId))
+            .thenReturn(Member(id = adminMemberId, meetingId = meetingId, userId = userId, role = MemberRole.ADMIN))
         val request = NoticeCreateRequest(
             title = "10월 회비 안내",
             content = "10월 회비는 10일까지 납부 부탁드립니다."
@@ -44,7 +66,7 @@ class NoticeServiceTests : BehaviorSpec({
         val savedEntity = Notice(
             id = 30L,
             meetingId = meetingId,
-            membersId = userId,
+            membersId = adminMemberId,
             title = requireNotNull(request.title),
             content = requireNotNull(request.content)
         )
@@ -54,11 +76,17 @@ class NoticeServiceTests : BehaviorSpec({
         When("createNotice 메서드를 호출하면") {
             val response = noticeService.createNotice(meetingId, userId, request)
 
-            Then("Notice 엔티티가 영속화되고 올바른 응답 DTO가 반환된다") {
+            Then("사용자 ID가 아닌 관리자의 구성원 ID로 공지와 작성자 읽음 기록이 저장되고 올바른 응답 DTO가 반환된다") {
                 response.shouldNotBeNull()
                 response.noticeId shouldBe 30L
                 response.title shouldBe "10월 회비 안내"
-                verify(noticeRepository).save(any(Notice::class.java))
+                verify(memberService).validateAdmin(meetingId, userId)
+                val noticeCaptor = ArgumentCaptor.forClass(Notice::class.java)
+                verify(noticeRepository).save(noticeCaptor.capture())
+                noticeCaptor.value.membersId shouldBe adminMemberId
+                val readCaptor = ArgumentCaptor.forClass(NoticeRead::class.java)
+                verify(noticeReadRepository).save(readCaptor.capture())
+                readCaptor.value.memberId shouldBe adminMemberId
             }
         }
     }
@@ -75,16 +103,17 @@ class NoticeServiceTests : BehaviorSpec({
             content = "삭제할 공지 내용"
         )
 
-        `when`(noticeRepository.findById(noticeId)).thenReturn(Optional.of(targetNotice))
+        `when`(noticeRepository.findByIdAndMeetingIdForUpdate(noticeId, meetingId)).thenReturn(targetNotice)
 
         When("deleteNotice 메서드를 호출하면") {
             val response = noticeService.deleteNotice(meetingId, noticeId, userId)
 
-            Then("연결된 정산의 공지 연결을 먼저 해제한 뒤 공지를 삭제하고 noticeId를 반환한다") {
+            Then("연결된 정산의 공지 연결 해제와 읽음 기록 삭제를 먼저 한 뒤 공지를 삭제하고 noticeId를 반환한다") {
                 response.shouldNotBeNull()
                 response.noticeId shouldBe 30L
-                val order = inOrder(settlementRepository, noticeRepository)
+                val order = inOrder(settlementRepository, noticeReadRepository, noticeRepository)
                 order.verify(settlementRepository).clearNoticeId(noticeId)
+                order.verify(noticeReadRepository).deleteAllByNoticeId(noticeId)
                 order.verify(noticeRepository).delete(targetNotice)
             }
         }
@@ -161,6 +190,50 @@ class NoticeServiceTests : BehaviorSpec({
         }
     }
 
+    Given("작성자가 남아 있는 공지, 모임을 나간 공지, 다른 모임 구성원이 작성자로 저장된 공지가 함께 조회될 때") {
+        val repository: NoticeRepository = mock(NoticeRepository::class.java)
+        val members: MemberRepository = mock(MemberRepository::class.java)
+        val users: AppUserRepository = mock(AppUserRepository::class.java)
+        val service = NoticeService(repository, settlementRepository, noticeReadRepository, memberService, members, users)
+        val meetingId = 1L
+        val pageable = PageRequest.of(0, 20, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")))
+        val notices = listOf(
+            Notice(id = 31L, meetingId = meetingId, membersId = 3L, title = "남은 작성자", content = "내용"),
+            Notice(id = 30L, meetingId = meetingId, membersId = 7L, title = "나간 작성자", content = "내용"),
+            Notice(id = 29L, meetingId = meetingId, membersId = 3L, title = "남은 작성자 2", content = "내용"),
+            Notice(id = 28L, meetingId = meetingId, membersId = 8L, title = "잘못 저장된 작성자", content = "내용")
+        )
+        `when`(repository.findAllByMeetingId(meetingId, pageable)).thenReturn(PageImpl(notices, pageable, 4L))
+        // 구성원 7은 모임을 나가 구성원 행이 없음, 구성원 8은 다른 모임(2) 구성원
+        `when`(members.findAllById(setOf(3L, 7L, 8L))).thenReturn(
+            listOf(
+                Member(id = 3L, meetingId = meetingId, userId = 10L, role = MemberRole.ADMIN),
+                Member(id = 8L, meetingId = 2L, userId = 20L, role = MemberRole.ADMIN)
+            )
+        )
+        fun user(id: Long, name: String, color: ProfileColor) = AppUser(
+            id = id, name = name, email = "user$id@moamoa.test", password = "password", profileColor = color, termsAgreedAt = OffsetDateTime.now()
+        )
+        `when`(users.findAllById(listOf(10L))).thenReturn(listOf(user(10L, "김모아", ProfileColor.DARK)))
+        // 모임 확인이 빠지면 다른 모임 사용자까지 조회되는 경우
+        `when`(users.findAllById(listOf(10L, 20L))).thenReturn(listOf(user(10L, "김모아", ProfileColor.DARK), user(20L, "다른모임", ProfileColor.GRAY)))
+
+        When("getNotices를 호출하면") {
+            val authors = service.getNotices(meetingId, 0, 20, 1L).notices.map { it.author }
+
+            Then("작성자 정보를 한 번에 조회해 채우고, 나간 작성자와 다른 모임 구성원은 \"탈퇴한 사용자\"와 기본 프로필 색으로 반환한다") {
+                authors.map { Triple(it.memberId, it.userName, it.profileColor) } shouldBe listOf(
+                    Triple(3L, "김모아", ProfileColor.DARK),
+                    Triple(7L, "탈퇴한 사용자", ProfileColor.LIGHT_BLUE),
+                    Triple(3L, "김모아", ProfileColor.DARK),
+                    Triple(8L, "탈퇴한 사용자", ProfileColor.LIGHT_BLUE)
+                )
+                verify(members).findAllById(setOf(3L, 7L, 8L))
+                verify(users).findAllById(listOf(10L))
+            }
+        }
+    }
+
     Given("공지 목록 조회의 페이징 경계 상황이 주어졌을 때") {
         val meetingId = 1L
         val sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))
@@ -211,7 +284,7 @@ class NoticeServiceTests : BehaviorSpec({
 
     Given("존재하지 않는 공지사항 식별자가 주어졌을 때") {
         val repository: NoticeRepository = mock(NoticeRepository::class.java)
-        val service = NoticeService(repository, settlementRepository)
+        val service = noticeService(repository)
         val meetingId = 1L
         val noticeId = 999L
 
@@ -226,6 +299,7 @@ class NoticeServiceTests : BehaviorSpec({
                 exception.errorCode shouldBe ErrorCode.NOT_FOUND
                 verify(repository, never()).delete(any(Notice::class.java))
                 verify(settlementRepository, never()).clearNoticeId(anyLong())
+                verify(noticeReadRepository, never()).deleteAllByNoticeId(anyLong())
             }
         }
 
@@ -241,7 +315,7 @@ class NoticeServiceTests : BehaviorSpec({
     }
     Given("다른 모임에 속한 공지사항 식별자가 주어졌을 때") {
         val repository: NoticeRepository = mock(NoticeRepository::class.java)
-        val service = NoticeService(repository, settlementRepository)
+        val service = noticeService(repository)
         val noticeId = 30L
         val otherMeetingNotice = Notice(
             id = noticeId,
@@ -262,6 +336,7 @@ class NoticeServiceTests : BehaviorSpec({
                 exception.errorCode shouldBe ErrorCode.NOT_FOUND
                 verify(repository, never()).delete(any(Notice::class.java))
                 verify(settlementRepository, never()).clearNoticeId(anyLong())
+                verify(noticeReadRepository, never()).deleteAllByNoticeId(anyLong())
             }
         }
 
@@ -344,6 +419,83 @@ class NoticeServiceTests : BehaviorSpec({
             Then("NOT_FOUND 예외가 발생하고 공지는 변경되지 않는다") {
                 exception.errorCode shouldBe ErrorCode.NOT_FOUND
                 otherMeetingNotice.title shouldBe "다른 모임 공지"
+            }
+        }
+    }
+
+    Given("모임 관리자(ADMIN)가 아닌 사용자가 공지 작성·수정·삭제를 요청할 때") {
+        val repository: NoticeRepository = mock(NoticeRepository::class.java)
+        val service = noticeService(repository)
+        val meetingId = 1L
+        val memberUserId = 2L
+        `when`(memberService.validateAdmin(meetingId, memberUserId))
+            .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 관리자만 요청할 수 있습니다."))
+
+        listOf<Pair<String, () -> Any>>(
+            "createNotice" to { service.createNotice(meetingId, memberUserId, NoticeCreateRequest(title = "공지", content = "내용")) },
+            "updateNotice" to { service.updateNotice(meetingId, 30L, memberUserId, NoticeUpdateRequest(title = Optional.of("수정"))) },
+            "deleteNotice" to { service.deleteNotice(meetingId, 30L, memberUserId) }
+        ).forEach { (method, call) ->
+            When("$method 메서드를 호출하면") {
+                val exception = shouldThrow<ApiException> { call() }
+
+                Then("FORBIDDEN 예외가 발생하고 공지를 조회·저장·삭제하지 않는다") {
+                    exception.errorCode shouldBe ErrorCode.FORBIDDEN
+                    verify(memberService).validateAdmin(meetingId, memberUserId)
+                    verifyNoInteractions(repository)
+                    verify(noticeReadRepository, never()).save(any(NoticeRead::class.java))
+                    verify(noticeReadRepository, never()).deleteAllByNoticeId(anyLong())
+                    verify(settlementRepository, never()).clearNoticeId(anyLong())
+                }
+            }
+        }
+    }
+
+    Given("모임 구성원이 아닌 사용자가 공지 목록·상세를 요청할 때") {
+        val repository: NoticeRepository = mock(NoticeRepository::class.java)
+        val service = noticeService(repository)
+        val meetingId = 1L
+        val outsiderUserId = 3L
+        `when`(memberService.validateMember(meetingId, outsiderUserId))
+            .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 구성원만 요청할 수 있습니다."))
+
+        listOf<Pair<String, () -> Any>>(
+            "getNotices" to { service.getNotices(meetingId, 0, 20, outsiderUserId) },
+            "getNoticeDetail" to { service.getNoticeDetail(meetingId, 30L, outsiderUserId) }
+        ).forEach { (method, call) ->
+            When("$method 메서드를 호출하면") {
+                val exception = shouldThrow<ApiException> { call() }
+
+                Then("FORBIDDEN 예외가 발생하고 공지를 조회하지 않는다") {
+                    exception.errorCode shouldBe ErrorCode.FORBIDDEN
+                    verify(memberService).validateMember(meetingId, outsiderUserId)
+                    verifyNoInteractions(repository)
+                }
+            }
+        }
+    }
+
+    Given("없거나 종료된 모임의 공지를 요청할 때") {
+        val repository: NoticeRepository = mock(NoticeRepository::class.java)
+        val service = noticeService(repository)
+        val endedMeetingId = 404L
+        val userId = 1L
+        `when`(memberService.validateAdmin(endedMeetingId, userId))
+            .thenThrow(ApiException(ErrorCode.NOT_FOUND, "모임을 찾을 수 없습니다."))
+        `when`(memberService.validateMember(endedMeetingId, userId))
+            .thenThrow(ApiException(ErrorCode.NOT_FOUND, "모임을 찾을 수 없습니다."))
+
+        listOf<Pair<String, () -> Any>>(
+            "createNotice" to { service.createNotice(endedMeetingId, userId, NoticeCreateRequest(title = "공지", content = "내용")) },
+            "getNoticeDetail" to { service.getNoticeDetail(endedMeetingId, 30L, userId) }
+        ).forEach { (method, call) ->
+            When("$method 메서드를 호출하면") {
+                val exception = shouldThrow<ApiException> { call() }
+
+                Then("NOT_FOUND 예외가 발생하고 공지를 조회·저장하지 않는다") {
+                    exception.errorCode shouldBe ErrorCode.NOT_FOUND
+                    verifyNoInteractions(repository)
+                }
             }
         }
     }

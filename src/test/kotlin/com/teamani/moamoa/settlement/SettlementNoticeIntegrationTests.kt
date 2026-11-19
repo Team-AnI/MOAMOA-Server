@@ -1,5 +1,10 @@
 package com.teamani.moamoa.settlement
 
+import com.teamani.moamoa.meeting.entity.Meeting
+import com.teamani.moamoa.meeting.repository.MeetingRepository
+import com.teamani.moamoa.member.entity.Member
+import com.teamani.moamoa.member.entity.MemberRole
+import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.notice.entity.Notice
 import com.teamani.moamoa.notice.repository.NoticeRepository
 import com.teamani.moamoa.notice.service.NoticeService
@@ -45,6 +50,12 @@ class SettlementNoticeIntegrationTests : BehaviorSpec() {
     @MockitoSpyBean
     lateinit var noticeRepository: NoticeRepository
 
+    @Autowired
+    lateinit var meetingRepository: MeetingRepository
+
+    @Autowired
+    lateinit var memberRepository: MemberRepository
+
     init {
         Given("공지 저장이 실패하는 상황에서 공지 자동 등록을 요청했을 때") {
             // 다른 테스트 데이터와 섞이지 않도록 전용 모임 ID 사용
@@ -84,12 +95,16 @@ class SettlementNoticeIntegrationTests : BehaviorSpec() {
         }
 
         Given("정산에 연결된 안내 공지가 있을 때") {
-            val meetingId = 9503L
-            val created = settlementService.createSettlement(meetingId, 1L, request(postNotice = true))
+            // 공지 삭제는 관리자 권한을 확인하므로 실제 모임과 관리자 구성원을 저장
+            val meetingId = checkNotNull(meetingRepository.save(Meeting(name = "모아모아", inviteCode = "STLN9503")).id)
+            val adminMemberId = checkNotNull(
+                memberRepository.save(Member(meetingId = meetingId, userId = ADMIN_USER_ID, role = MemberRole.ADMIN)).id
+            )
+            val created = settlementService.createSettlement(meetingId, adminMemberId, request(postNotice = true))
             val noticeId = created.noticeId.shouldNotBeNull()
 
             When("공지를 삭제하면") {
-                noticeService.deleteNotice(meetingId, noticeId, 1L)
+                noticeService.deleteNotice(meetingId, noticeId, ADMIN_USER_ID)
 
                 Then("공지만 삭제되고 정산과 납부 항목은 유지되며 연결은 해제된다") {
                     noticesOf(meetingId) shouldBe emptyList()
@@ -113,4 +128,8 @@ class SettlementNoticeIntegrationTests : BehaviorSpec() {
         dueAt = OffsetDateTime.parse("2099-10-20T23:59:00+09:00"),
         postNotice = postNotice
     )
+
+    companion object {
+        private const val ADMIN_USER_ID = 9503L
+    }
 }

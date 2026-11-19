@@ -38,7 +38,7 @@ class AttendanceService(
         request: AttendanceUpdateRequest
     ): AttendanceUpdateResponse {
         memberService.validateAdmin(meetingId, userId)
-        val schedule = findSchedule(meetingId, scheduleId)
+        val schedule = findScheduleForUpdate(meetingId, scheduleId)
 
         val items = requireNotNull(request.attendances) { "출석 목록은 1개 이상이어야 합니다." }
             .map { requireNotNull(it) { "출석 항목은 null일 수 없습니다." } }
@@ -109,7 +109,7 @@ class AttendanceService(
             val memberId = checkNotNull(member.id) { "구성원 식별자가 없습니다." }
             AttendanceMemberResponse(
                 memberId = memberId,
-                nickname = null,
+                userName = null,
                 status = AttendanceViewStatus.from(statusByMemberId[memberId])
             )
         }
@@ -120,6 +120,11 @@ class AttendanceService(
     // 다른 모임의 일정도 존재하지 않는 일정으로 처리
     private fun findSchedule(meetingId: Long, scheduleId: Long): Schedule =
         scheduleRepository.findByIdAndMeetingId(scheduleId, meetingId)
+            ?: throw ApiException(ErrorCode.NOT_FOUND, "일정을 찾을 수 없습니다.")
+
+    // 일정 삭제와 같은 일정 잠금으로 조회해, 처리 중인 출석 기록이 삭제 뒤에 남지 않게 함
+    private fun findScheduleForUpdate(meetingId: Long, scheduleId: Long): Schedule =
+        scheduleRepository.findByIdAndMeetingIdForUpdate(scheduleId, meetingId)
             ?: throw ApiException(ErrorCode.NOT_FOUND, "일정을 찾을 수 없습니다.")
 
     // 위반한 제약 이름 확인 (PostgreSQL은 제약 이름 그대로, H2는 "public.<이름> INDEX ..." 형태라 포함 여부로 비교)

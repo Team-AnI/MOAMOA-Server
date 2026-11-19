@@ -146,14 +146,14 @@ class SettlementServiceTests : BehaviorSpec({
         )
 
         `when`(settlementRepository.save(any(Settlement::class.java))).thenReturn(settlement(40L))
-        `when`(noticeService.createNotice(1L, 1L, expectedNotice))
+        `when`(noticeService.createNoticeByMember(1L, 1L, expectedNotice))
             .thenReturn(NoticeCreateResponse(noticeId = 12L, title = "[정산] 10월 정기 모임 식비"))
 
         When("createSettlement 메서드를 호출하면") {
             val response = settlementService.createSettlement(1L, 1L, request)
 
             Then("정산 안내 공지가 생성되고 정산에 공지 ID가 연결된다") {
-                verify(noticeService).createNotice(1L, 1L, expectedNotice)
+                verify(noticeService).createNoticeByMember(1L, 1L, expectedNotice)
                 response.noticeId shouldBe 12L
             }
         }
@@ -181,14 +181,14 @@ class SettlementServiceTests : BehaviorSpec({
         )
 
         `when`(settlementRepository.save(any(Settlement::class.java))).thenReturn(settlement(41L, title = longTitle))
-        `when`(noticeService.createNotice(1L, 1L, expectedNotice))
+        `when`(noticeService.createNoticeByMember(1L, 1L, expectedNotice))
             .thenReturn(NoticeCreateResponse(noticeId = 13L, title = expectedNotice.title.orEmpty()))
 
         When("createSettlement 메서드를 호출하면") {
             val response = settlementService.createSettlement(1L, 1L, request)
 
             Then("공지 제목은 앞 50자까지만 쓰고 공지 내용에는 정산명 전체가 들어간다") {
-                verify(noticeService).createNotice(1L, 1L, expectedNotice)
+                verify(noticeService).createNoticeByMember(1L, 1L, expectedNotice)
                 expectedNotice.title.orEmpty().length shouldBe 50
                 response.noticeId shouldBe 13L
             }

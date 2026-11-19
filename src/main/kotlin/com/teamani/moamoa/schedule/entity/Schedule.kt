@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import java.time.OffsetDateTime
+import java.util.Optional
 
 @Entity
 @Table(name = "schedule")
@@ -52,18 +53,18 @@ class Schedule(
     val id: Long? = null
 ) {
 
-    // 전달된 값만 변경 (null이면 기존 값 유지)
+    // 전달된 값만 변경 (null이면 기존 값 유지, 선택 항목은 Optional.empty면 값 비움)
     fun update(
         title: String?,
-        description: String?,
+        description: Optional<String>?,
         startsAt: OffsetDateTime?,
-        endedAt: OffsetDateTime?,
-        location: String?
+        endedAt: Optional<OffsetDateTime>?,
+        location: Optional<String>?
     ) {
         title?.let { this.title = it }
-        description?.let { this.description = it }
+        description?.let { this.description = it.orElse(null) }
         startsAt?.let { this.startsAt = it }
-        endedAt?.let { this.endedAt = it }
-        location?.let { this.location = it }
+        endedAt?.let { this.endedAt = it.orElse(null) }
+        location?.let { this.location = it.orElse(null) }
     }
 }
