@@ -12,6 +12,8 @@ import com.teamani.moamoa.settlement.dto.SettlementCreateRequest
 import com.teamani.moamoa.settlement.repository.SettlementMemberRepository
 import com.teamani.moamoa.settlement.repository.SettlementRepository
 import com.teamani.moamoa.settlement.service.SettlementService
+import com.teamani.moamoa.user.entity.AppUser
+import com.teamani.moamoa.user.repository.AppUserRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
@@ -27,6 +29,7 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import java.time.OffsetDateTime
+import java.util.UUID
 
 // 실제 트랜잭션·DB에서 정산과 안내 공지가 함께 생성·롤백되고, 공지 삭제 시 연결이 해제되는지 검증
 @SpringBootTest
@@ -56,58 +59,63 @@ class SettlementNoticeIntegrationTests : BehaviorSpec() {
     @Autowired
     lateinit var memberRepository: MemberRepository
 
+    @Autowired
+    lateinit var appUserRepository: AppUserRepository
+
     init {
         Given("공지 저장이 실패하는 상황에서 공지 자동 등록을 요청했을 때") {
-            // 다른 테스트 데이터와 섞이지 않도록 전용 모임 ID 사용
-            val meetingId = 9501L
+            val group = savedGroup()
             val paymentCountBefore = settlementMemberRepository.count()
 
             When("정산을 생성하면") {
                 doThrow(IllegalStateException("공지 저장 실패")).`when`(noticeRepository).save(any(Notice::class.java))
                 val exception = shouldThrow<IllegalStateException> {
-                    settlementService.createSettlement(meetingId, 1L, request(postNotice = true))
+                    settlementService.createSettlement(group.meetingId, group.adminUserId, request(group.memberIds, postNotice = true))
                 }
                 reset(noticeRepository)
 
                 Then("예외가 전달되고 정산·납부 항목·공지가 모두 남지 않는다") {
                     exception.message shouldBe "공지 저장 실패"
-                    settlementRepository.findAllByMeetingIdOrderByCreatedAtDescIdDesc(meetingId) shouldBe emptyList()
+                    settlementRepository.findAllByMeetingIdOrderByCreatedAtDescIdDesc(group.meetingId) shouldBe emptyList()
                     settlementMemberRepository.count() shouldBe paymentCountBefore
-                    noticesOf(meetingId) shouldBe emptyList()
+                    noticesOf(group.meetingId) shouldBe emptyList()
                 }
             }
         }
 
         Given("공지 자동 등록을 요청했을 때") {
-            val meetingId = 9502L
+            val group = savedGroup()
 
             When("정산을 생성하면") {
-                val response = settlementService.createSettlement(meetingId, 1L, request(postNotice = true))
+                val response = settlementService.createSettlement(group.meetingId, group.adminUserId, request(group.memberIds, postNotice = true))
 
                 Then("정산·납부 항목·공지가 함께 저장되고 공지가 정산에 연결된다") {
-                    val notices = noticesOf(meetingId)
+                    val notices = noticesOf(group.meetingId)
                     notices.size shouldBe 1
                     response.noticeId shouldBe notices.single().id
                     settlementRepository.findById(response.settlementId).orElseThrow().noticeId shouldBe response.noticeId
                     settlementMemberRepository.findAllBySettlementIdOrderByIdAsc(response.settlementId).size shouldBe 3
                 }
+
+                Then("정산 생성자와 안내 공지 작성자는 요청한 관리자의 구성원이고, 공지에 그 관리자 이름이 표시된다") {
+                    settlementRepository.findById(response.settlementId).orElseThrow().createdBy shouldBe group.adminMemberId
+                    val author = noticeService.getNotices(group.meetingId, 0, 20, group.adminUserId).notices.single().author
+                    author.memberId shouldBe group.adminMemberId
+                    author.userName shouldBe "관리자"
+                }
             }
         }
 
         Given("정산에 연결된 안내 공지가 있을 때") {
-            // 공지 삭제는 관리자 권한을 확인하므로 실제 모임과 관리자 구성원을 저장
-            val meetingId = checkNotNull(meetingRepository.save(Meeting(name = "모아모아", inviteCode = "STLN9503")).id)
-            val adminMemberId = checkNotNull(
-                memberRepository.save(Member(meetingId = meetingId, userId = ADMIN_USER_ID, role = MemberRole.ADMIN)).id
-            )
-            val created = settlementService.createSettlement(meetingId, adminMemberId, request(postNotice = true))
+            val group = savedGroup()
+            val created = settlementService.createSettlement(group.meetingId, group.adminUserId, request(group.memberIds, postNotice = true))
             val noticeId = created.noticeId.shouldNotBeNull()
 
             When("공지를 삭제하면") {
-                noticeService.deleteNotice(meetingId, noticeId, ADMIN_USER_ID)
+                noticeService.deleteNotice(group.meetingId, noticeId, group.adminUserId)
 
                 Then("공지만 삭제되고 정산과 납부 항목은 유지되며 연결은 해제된다") {
-                    noticesOf(meetingId) shouldBe emptyList()
+                    noticesOf(group.meetingId) shouldBe emptyList()
                     settlementRepository.findById(created.settlementId).orElseThrow().noticeId.shouldBeNull()
                     settlementMemberRepository.findAllBySettlementIdOrderByIdAsc(created.settlementId).size shouldBe 3
                 }
@@ -118,10 +126,31 @@ class SettlementNoticeIntegrationTests : BehaviorSpec() {
     private fun noticesOf(meetingId: Long): List<Notice> =
         noticeRepository.findAllByMeetingId(meetingId, PageRequest.of(0, 20)).content
 
-    private fun request(postNotice: Boolean) = SettlementCreateRequest(
+    // 정산·공지 권한을 확인하므로 실제 모임에 관리자 1명(사용자 정보 포함)과 일반 구성원 2명을 저장
+    private fun savedGroup(): Group {
+        val meetingId = checkNotNull(meetingRepository.save(Meeting(name = "모아모아", inviteCode = UUID.randomUUID().toString().take(8))).id)
+        val adminUserId = checkNotNull(
+            appUserRepository.save(
+                AppUser(
+                    name = "관리자",
+                    email = "settlement-notice-${UUID.randomUUID()}@moamoa.test",
+                    password = "password",
+                    termsAgreedAt = OffsetDateTime.now()
+                )
+            ).id
+        )
+        val adminMemberId = savedMember(meetingId, adminUserId, MemberRole.ADMIN)
+        val memberIds = listOf(adminMemberId) + List(2) { index -> savedMember(meetingId, MEMBER_USER_ID_BASE + index, MemberRole.MEMBER) }
+        return Group(meetingId, adminUserId, adminMemberId, memberIds)
+    }
+
+    private fun savedMember(meetingId: Long, userId: Long, role: MemberRole): Long =
+        checkNotNull(memberRepository.save(Member(meetingId = meetingId, userId = userId, role = role)).id)
+
+    private fun request(memberIds: List<Long>, postNotice: Boolean) = SettlementCreateRequest(
         title = "10월 정기 모임 식비",
         totalAmount = 10000,
-        memberIds = listOf(1L, 5L, 9L),
+        memberIds = memberIds,
         bankName = "국민은행",
         accountNumber = "123456789012",
         accountHolder = "김모아",
@@ -129,7 +158,9 @@ class SettlementNoticeIntegrationTests : BehaviorSpec() {
         postNotice = postNotice
     )
 
+    private data class Group(val meetingId: Long, val adminUserId: Long, val adminMemberId: Long, val memberIds: List<Long>)
+
     companion object {
-        private const val ADMIN_USER_ID = 9503L
+        private const val MEMBER_USER_ID_BASE = 9500L
     }
 }

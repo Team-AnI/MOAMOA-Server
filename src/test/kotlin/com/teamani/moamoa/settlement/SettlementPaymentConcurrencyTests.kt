@@ -2,6 +2,11 @@ package com.teamani.moamoa.settlement
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.meeting.entity.Meeting
+import com.teamani.moamoa.meeting.repository.MeetingRepository
+import com.teamani.moamoa.member.entity.Member
+import com.teamani.moamoa.member.entity.MemberRole
+import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.settlement.entity.PaymentStatus
 import com.teamani.moamoa.settlement.entity.Settlement
 import com.teamani.moamoa.settlement.entity.SettlementMember
@@ -18,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import java.time.OffsetDateTime
+import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -39,10 +45,16 @@ class SettlementPaymentConcurrencyTests : BehaviorSpec() {
     @Autowired
     lateinit var settlementMemberRepository: SettlementMemberRepository
 
+    @Autowired
+    lateinit var meetingRepository: MeetingRepository
+
+    @Autowired
+    lateinit var memberRepository: MemberRepository
+
     init {
         Given("대상자 2명의 납부 항목이 모두 확인 대기(PENDING)인 정산이 여러 개 있을 때") {
-            // 다른 테스트 데이터와 섞이지 않도록 전용 모임 ID 사용
-            val meetingId = 9401L
+            // 승인·반려·제출은 권한을 확인하므로 실제 모임과 관리자 구성원을 저장
+            val meetingId = savedMeeting()
             // 타이밍에 따라 드물게 생기는 경합이라 여러 번 반복해서 검증
             val rounds = List(30) {
                 val settlementId = savedSettlement(meetingId)
@@ -55,7 +67,7 @@ class SettlementPaymentConcurrencyTests : BehaviorSpec() {
             When("정산마다 서로 다른 납부 항목을 동시에 승인하면") {
                 val results = rounds.flatMap { (settlementId, paymentIds) ->
                     runConcurrently(
-                        paymentIds.map { id -> { settlementService.approvePayment(meetingId, 1L, settlementId, id) } }
+                        paymentIds.map { id -> { settlementService.approvePayment(meetingId, ADMIN_USER_ID, settlementId, id) } }
                     )
                 }
 
@@ -68,13 +80,13 @@ class SettlementPaymentConcurrencyTests : BehaviorSpec() {
         }
 
         Given("확인 대기(PENDING)인 납부 항목 하나가 있을 때") {
-            val meetingId = 9402L
+            val meetingId = savedMeeting()
             val settlementId = savedSettlement(meetingId)
             val paymentId = savedPayment(settlementId, 1L, PaymentStatus.PENDING)
 
             When("같은 항목을 동시에 승인하면") {
                 val results = runConcurrently(
-                    List(4) { { settlementService.approvePayment(meetingId, 1L, settlementId, paymentId) } }
+                    List(4) { { settlementService.approvePayment(meetingId, ADMIN_USER_ID, settlementId, paymentId) } }
                 )
 
                 Then("한 요청만 성공하고 나머지는 409 CONFLICT다") {
@@ -86,7 +98,7 @@ class SettlementPaymentConcurrencyTests : BehaviorSpec() {
         }
 
         Given("확인 대기(PENDING)인 납부 항목에 승인과 반려가 동시에 들어올 때") {
-            val meetingId = 9403L
+            val meetingId = savedMeeting()
             val settlementId = savedSettlement(meetingId)
             // 다른 대상자가 남아 있으면 승인돼도 정산이 완료되지 않으므로 대상자는 한 명
             val paymentId = savedPayment(settlementId, 1L, PaymentStatus.PENDING)
@@ -94,8 +106,8 @@ class SettlementPaymentConcurrencyTests : BehaviorSpec() {
             When("두 요청을 동시에 실행하면") {
                 val (approveError, rejectError) = runConcurrently(
                     listOf(
-                        { settlementService.approvePayment(meetingId, 1L, settlementId, paymentId) },
-                        { settlementService.rejectPayment(meetingId, 1L, settlementId, paymentId, "입금 내역 없음") }
+                        { settlementService.approvePayment(meetingId, ADMIN_USER_ID, settlementId, paymentId) },
+                        { settlementService.rejectPayment(meetingId, ADMIN_USER_ID, settlementId, paymentId, "입금 내역 없음") }
                     )
                 )
 
@@ -119,14 +131,15 @@ class SettlementPaymentConcurrencyTests : BehaviorSpec() {
         }
 
         Given("미납(UNPAID)인 납부 항목 하나가 있을 때") {
-            val meetingId = 9404L
-            val memberId = 5L
+            val meetingId = savedMeeting()
+            val memberUserId = MEMBER_USER_ID
+            val memberId = checkNotNull(memberRepository.save(Member(meetingId = meetingId, userId = memberUserId, role = MemberRole.MEMBER)).id)
             val settlementId = savedSettlement(meetingId)
             val paymentId = savedPayment(settlementId, memberId, PaymentStatus.UNPAID)
 
             When("같은 구성원이 납부 완료를 동시에 제출하면") {
                 val results = runConcurrently(
-                    List(4) { { settlementService.submitPayment(meetingId, memberId, settlementId) } }
+                    List(4) { { settlementService.submitPayment(meetingId, memberUserId, settlementId) } }
                 )
 
                 Then("한 요청만 성공하고 나머지는 409 CONFLICT다") {
@@ -138,14 +151,14 @@ class SettlementPaymentConcurrencyTests : BehaviorSpec() {
         }
 
         Given("서로 다른 정산의 납부 항목이 있을 때") {
-            val meetingId = 9405L
+            val meetingId = savedMeeting()
             val settlementIds = List(2) { savedSettlement(meetingId) }
             val paymentIds = settlementIds.map { savedPayment(it, 1L, PaymentStatus.PENDING) }
 
             When("각 항목을 동시에 승인하면") {
                 val results = runConcurrently(
                     settlementIds.zip(paymentIds).map { (settlementId, paymentId) ->
-                        { settlementService.approvePayment(meetingId, 1L, settlementId, paymentId) }
+                        { settlementService.approvePayment(meetingId, ADMIN_USER_ID, settlementId, paymentId) }
                     }
                 )
 
@@ -182,6 +195,13 @@ class SettlementPaymentConcurrencyTests : BehaviorSpec() {
         }
     }
 
+    // 관리자(ADMIN_USER_ID)가 있는 모임 저장
+    private fun savedMeeting(): Long {
+        val meetingId = checkNotNull(meetingRepository.save(Meeting(name = "모아모아", inviteCode = UUID.randomUUID().toString().take(8))).id)
+        memberRepository.save(Member(meetingId = meetingId, userId = ADMIN_USER_ID, role = MemberRole.ADMIN))
+        return meetingId
+    }
+
     private fun savedSettlement(meetingId: Long): Long =
         checkNotNull(
             settlementRepository.save(
@@ -209,4 +229,9 @@ class SettlementPaymentConcurrencyTests : BehaviorSpec() {
 
     private fun settlementStatus(settlementId: Long): SettlementStatus =
         settlementRepository.findById(settlementId).orElseThrow().status
+
+    companion object {
+        private const val ADMIN_USER_ID = 9401L
+        private const val MEMBER_USER_ID = 9402L
+    }
 }

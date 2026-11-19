@@ -1,5 +1,6 @@
 package com.teamani.moamoa.settlement.controller
 
+import com.teamani.moamoa.global.auth.JwtTokenProvider
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.settlement.dto.PaymentApproveResponse
@@ -15,11 +16,14 @@ import com.teamani.moamoa.settlement.service.SettlementService
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import org.mockito.Mockito.`when`
+import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.ResultActionsDsl
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import java.time.OffsetDateTime
@@ -36,7 +40,14 @@ class SettlementControllerTests : BehaviorSpec() {
     @MockitoBean
     lateinit var settlementService: SettlementService
 
+    @MockitoBean
+    lateinit var jwtTokenProvider: JwtTokenProvider
+
     init {
+        beforeTest {
+            `when`(jwtTokenProvider.getUserId(ACCESS_TOKEN)).thenReturn(1L)
+        }
+
         // 요청 일시는 역직렬화 시 오프셋이 바뀌어도 equals가 유지되도록 UTC(Z)로 작성
         Given("유효한 정산 생성 요청(POST /v1/meetings/{meetingId}/settlements)이 주어졌을 때") {
             val request = SettlementCreateRequest(
@@ -64,6 +75,7 @@ class SettlementControllerTests : BehaviorSpec() {
                     )
 
                     mockMvc.post("/v1/meetings/1/settlements") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """
                             {
@@ -117,6 +129,7 @@ class SettlementControllerTests : BehaviorSpec() {
                 When("$case 요청으로 생성 API를 호출하면") {
                     Then("400 Bad Request와 VALIDATION_ERROR를 반환한다") {
                         mockMvc.post("/v1/meetings/1/settlements") {
+                            header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                             contentType = MediaType.APPLICATION_JSON
                             content = requestJson
                         }.andExpect {
@@ -151,7 +164,9 @@ class SettlementControllerTests : BehaviorSpec() {
                         )
                     )
 
-                    mockMvc.get("/v1/meetings/1/settlements").andExpect {
+                    mockMvc.get("/v1/meetings/1/settlements") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.settlements[0].settlementId") { value(40) }
                         jsonPath("$.data.settlements[0].memberCount") { value(3) }
@@ -168,7 +183,9 @@ class SettlementControllerTests : BehaviorSpec() {
                     `when`(settlementService.getSettlement(1L, 1L, 999L))
                         .thenThrow(ApiException(ErrorCode.NOT_FOUND, "정산을 찾을 수 없습니다."))
 
-                    mockMvc.get("/v1/meetings/1/settlements/999").andExpect {
+                    mockMvc.get("/v1/meetings/1/settlements/999") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isNotFound() }
                         jsonPath("$.success") { value(false) }
                         jsonPath("$.error.code") { value("NOT_FOUND") }
@@ -188,7 +205,9 @@ class SettlementControllerTests : BehaviorSpec() {
                         )
                     )
 
-                    mockMvc.post("/v1/meetings/1/settlements/40/payments/me/submissions").andExpect {
+                    mockMvc.post("/v1/meetings/1/settlements/40/payments/me/submissions") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.paymentId") { value(81) }
                         jsonPath("$.data.status") { value("PENDING") }
@@ -202,7 +221,9 @@ class SettlementControllerTests : BehaviorSpec() {
                     `when`(settlementService.submitPayment(1L, 1L, 41L))
                         .thenThrow(ApiException(ErrorCode.CONFLICT, "이미 납부 완료를 제출했거나 완납한 정산입니다."))
 
-                    mockMvc.post("/v1/meetings/1/settlements/41/payments/me/submissions").andExpect {
+                    mockMvc.post("/v1/meetings/1/settlements/41/payments/me/submissions") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isConflict() }
                         jsonPath("$.error.code") { value("CONFLICT") }
                     }
@@ -221,7 +242,9 @@ class SettlementControllerTests : BehaviorSpec() {
                         )
                     )
 
-                    mockMvc.post("/v1/meetings/1/settlements/40/payments/81/approval").andExpect {
+                    mockMvc.post("/v1/meetings/1/settlements/40/payments/81/approval") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.status") { value("PAID") }
                         jsonPath("$.data.confirmedAt") { exists() }
@@ -238,6 +261,7 @@ class SettlementControllerTests : BehaviorSpec() {
                     )
 
                     mockMvc.post("/v1/meetings/1/settlements/40/payments/81/rejection") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{ "reason": "입금 내역을 확인할 수 없습니다." }"""
                     }.andExpect {
@@ -254,7 +278,9 @@ class SettlementControllerTests : BehaviorSpec() {
                         PaymentRejectResponse(82L, PaymentStatus.UNPAID, null)
                     )
 
-                    mockMvc.post("/v1/meetings/1/settlements/40/payments/82/rejection").andExpect {
+                    mockMvc.post("/v1/meetings/1/settlements/40/payments/82/rejection") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.paymentId") { value(82) }
                         jsonPath("$.data.rejectionReason") { value(null as Any?) }
@@ -265,6 +291,7 @@ class SettlementControllerTests : BehaviorSpec() {
             When("255자를 초과한 반려 사유로 호출하면") {
                 Then("400 Bad Request와 VALIDATION_ERROR를 반환한다") {
                     mockMvc.post("/v1/meetings/1/settlements/40/payments/81/rejection") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{ "reason": "${"가".repeat(256)}" }"""
                     }.andExpect {
@@ -278,12 +305,41 @@ class SettlementControllerTests : BehaviorSpec() {
         Given("숫자가 아닌 정산 ID로 상세 조회 요청이 주어졌을 때") {
             When("상세 API를 호출하면") {
                 Then("400 Bad Request와 INPUT_ERROR를 반환한다") {
-                    mockMvc.get("/v1/meetings/1/settlements/abc").andExpect {
+                    mockMvc.get("/v1/meetings/1/settlements/abc") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isBadRequest() }
                         jsonPath("$.error.code") { value("INPUT_ERROR") }
                     }
                 }
             }
         }
+
+        Given("액세스 토큰 없이 정산 API를 요청할 때") {
+            listOf<Pair<String, () -> ResultActionsDsl>>(
+                "정산 생성" to { mockMvc.post("/v1/meetings/1/settlements") { contentType = MediaType.APPLICATION_JSON; content = "{}" } },
+                "정산 목록" to { mockMvc.get("/v1/meetings/1/settlements") },
+                "정산 상세" to { mockMvc.get("/v1/meetings/1/settlements/40") },
+                "납부 완료 제출" to { mockMvc.post("/v1/meetings/1/settlements/40/payments/me/submissions") },
+                "납부 승인" to { mockMvc.post("/v1/meetings/1/settlements/40/payments/81/approval") },
+                "납부 반려" to { mockMvc.post("/v1/meetings/1/settlements/40/payments/81/rejection") }
+            ).forEach { (api, call) ->
+                When("$api API를 호출하면") {
+                    Then("401 Unauthorized와 UNAUTHORIZED 공통 에러 응답을 반환하고 Service를 호출하지 않는다") {
+                        call().andExpect {
+                            status { isUnauthorized() }
+                            jsonPath("$.error.code") { value("UNAUTHORIZED") }
+                        }
+                        verifyNoInteractions(settlementService)
+                    }
+                }
+            }
+        }
+    }
+
+    companion object {
+        // 토큰 검증은 mock으로 대체: ACCESS_TOKEN을 보내면 사용자 1로 인증
+        private const val ACCESS_TOKEN = "test-access-token"
+        private const val BEARER_TOKEN = "Bearer $ACCESS_TOKEN"
     }
 }

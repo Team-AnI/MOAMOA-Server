@@ -2,8 +2,12 @@ package com.teamani.moamoa.settlement.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.member.entity.MemberRole
+import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.service.NoticeService
+import com.teamani.moamoa.schedule.repository.ScheduleRepository
 import com.teamani.moamoa.settlement.dto.MyPaymentResponse
 import com.teamani.moamoa.settlement.dto.PaymentApproveResponse
 import com.teamani.moamoa.settlement.dto.PaymentRejectResponse
@@ -20,6 +24,7 @@ import com.teamani.moamoa.settlement.entity.Settlement
 import com.teamani.moamoa.settlement.entity.SettlementMember
 import com.teamani.moamoa.settlement.repository.SettlementMemberRepository
 import com.teamani.moamoa.settlement.repository.SettlementRepository
+import com.teamani.moamoa.user.repository.AppUserRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.OffsetDateTime
@@ -31,15 +36,16 @@ import java.util.Locale
 class SettlementService(
     private val settlementRepository: SettlementRepository,
     private val settlementMemberRepository: SettlementMemberRepository,
-    private val noticeService: NoticeService
+    private val noticeService: NoticeService,
+    private val memberService: MemberService,
+    private val memberRepository: MemberRepository,
+    private val appUserRepository: AppUserRepository,
+    private val scheduleRepository: ScheduleRepository
 ) {
 
     @Transactional
-    fun createSettlement(meetingId: Long, memberId: Long, request: SettlementCreateRequest): SettlementCreateResponse {
-        // 모임 존재 여부 및 ADMIN 권한 검증 (Member 도메인 연동 후속 이슈 #50 처리 예정)
-        validateMeeting(meetingId)
-        validateAdmin(meetingId, memberId)
-
+    fun createSettlement(meetingId: Long, userId: Long, request: SettlementCreateRequest): SettlementCreateResponse {
+        // 요청만으로 판단할 수 있는 오류(400)를 권한 검증보다 먼저 확인 (명세 공통 오류 순서)
         val memberIds = requireNotNull(request.memberIds) { "정산 대상 구성원은 필수입니다." }
         // DTO 검증을 거치지 않는 내부 호출(정기 회비 자동 생성 등)에서도 0으로 나누지 않도록 확인
         if (memberIds.isEmpty()) {
@@ -53,6 +59,9 @@ class SettlementService(
         if (totalAmount < memberIds.size) {
             throw ApiException(ErrorCode.VALIDATION_ERROR, "총 정산 금액은 대상 인원수 이상이어야 합니다.")
         }
+
+        // 모임 없음·종료 404 → 구성원 아님·ADMIN 아님 403, 생성자·공지 작성자는 요청한 관리자의 구성원 ID
+        val memberId = checkNotNull(memberService.validateAdmin(meetingId, userId).id) { "구성원 식별자가 없습니다." }
         validateTargetMembers(meetingId, memberIds)
         validateSchedule(meetingId, request.scheduleId)
 
@@ -100,9 +109,9 @@ class SettlementService(
     }
 
     @Transactional(readOnly = true)
-    fun getSettlements(meetingId: Long, memberId: Long): SettlementListResponse {
-        validateMeeting(meetingId)
-        validateMember(meetingId, memberId)
+    fun getSettlements(meetingId: Long, userId: Long): SettlementListResponse {
+        // 모임 없음·종료 404 → 구성원 아님 403
+        val memberId = checkNotNull(memberService.validateMember(meetingId, userId).id) { "구성원 식별자가 없습니다." }
 
         val settlements = settlementRepository.findAllByMeetingIdOrderByCreatedAtDescIdDesc(meetingId)
         // 정산이 없으면 납부 항목을 조회하지 않음
@@ -136,19 +145,24 @@ class SettlementService(
     }
 
     @Transactional(readOnly = true)
-    fun getSettlement(meetingId: Long, memberId: Long, settlementId: Long): SettlementDetailResponse {
-        validateMeeting(meetingId)
-        validateMember(meetingId, memberId)
+    fun getSettlement(meetingId: Long, userId: Long, settlementId: Long): SettlementDetailResponse {
+        // 모임 없음·종료 404 → 구성원 아님 403
+        val member = memberService.validateMember(meetingId, userId)
+        val memberId = checkNotNull(member.id) { "구성원 식별자가 없습니다." }
 
         val settlement = settlementRepository.findByIdAndMeetingId(settlementId, meetingId)
             ?: throw ApiException(ErrorCode.NOT_FOUND, "정산을 찾을 수 없습니다.")
         val payments = settlementMemberRepository.findAllBySettlementIdOrderByIdAsc(settlementId)
         val myPayment = payments.find { it.memberId == memberId }
+        // 일정 삭제 시 정산의 일정 연결이 해제되므로 연결된 일정은 항상 존재
+        val schedule = settlement.scheduleId?.let { scheduleRepository.findByIdAndMeetingId(it, meetingId) }
 
         return SettlementDetailResponse(
             settlementId = settlementId,
             title = settlement.title,
             scheduleId = settlement.scheduleId,
+            scheduleTitle = schedule?.title,
+            scheduleStartAt = schedule?.startsAt?.withOffsetSameInstant(KST),
             totalAmount = settlement.totalAmount,
             bankName = settlement.bankName,
             accountNumber = settlement.accountNumber,
@@ -167,14 +181,14 @@ class SettlementService(
                 paidAmount = payments.filter { it.status == PaymentStatus.PAID }.sumOf { it.amount }
             ),
             // 구성원 전원의 납부 현황은 ADMIN에게만 제공
-            payments = if (isAdmin(meetingId, memberId)) payments.map { toPaymentResponse(it) } else null
+            payments = if (member.role == MemberRole.ADMIN) toPaymentResponses(meetingId, payments) else null
         )
     }
 
     @Transactional
-    fun submitPayment(meetingId: Long, memberId: Long, settlementId: Long): PaymentSubmitResponse {
-        validateMeeting(meetingId)
-        validateMember(meetingId, memberId)
+    fun submitPayment(meetingId: Long, userId: Long, settlementId: Long): PaymentSubmitResponse {
+        // 모임 없음·종료 404 → 구성원 아님 403
+        val memberId = checkNotNull(memberService.validateMember(meetingId, userId).id) { "구성원 식별자가 없습니다." }
 
         lockSettlement(meetingId, settlementId)
         val payment = settlementMemberRepository.findBySettlementIdAndMemberId(settlementId, memberId)
@@ -195,9 +209,9 @@ class SettlementService(
     }
 
     @Transactional
-    fun approvePayment(meetingId: Long, memberId: Long, settlementId: Long, paymentId: Long): PaymentApproveResponse {
-        validateMeeting(meetingId)
-        validateAdmin(meetingId, memberId)
+    fun approvePayment(meetingId: Long, userId: Long, settlementId: Long, paymentId: Long): PaymentApproveResponse {
+        // 모임 없음·종료 404 → 구성원 아님·ADMIN 아님 403
+        memberService.validateAdmin(meetingId, userId)
 
         val settlement = lockSettlement(meetingId, settlementId)
         val payment = findPendingPayment(settlementId, paymentId, "확인 대기 상태의 납부만 승인할 수 있습니다.")
@@ -221,13 +235,13 @@ class SettlementService(
     @Transactional
     fun rejectPayment(
         meetingId: Long,
-        memberId: Long,
+        userId: Long,
         settlementId: Long,
         paymentId: Long,
         reason: String?
     ): PaymentRejectResponse {
-        validateMeeting(meetingId)
-        validateAdmin(meetingId, memberId)
+        // 모임 없음·종료 404 → 구성원 아님·ADMIN 아님 403
+        memberService.validateAdmin(meetingId, userId)
 
         lockSettlement(meetingId, settlementId)
         val payment = findPendingPayment(settlementId, paymentId, "확인 대기 상태의 납부만 반려할 수 있습니다.")
@@ -258,45 +272,39 @@ class SettlementService(
         return payment
     }
 
-    private fun toPaymentResponse(payment: SettlementMember): PaymentResponse =
-        PaymentResponse(
-            paymentId = checkNotNull(payment.id) { "납부 항목 식별자가 없습니다." },
-            memberId = payment.memberId,
-            userName = null, // TODO: User 도메인 연동 시 app_user.name으로 채움
-            amount = payment.amount,
-            status = payment.status,
-            submittedAt = payment.submittedAt?.withOffsetSameInstant(KST)
-        )
+    // 납부자 이름은 한 번에 조회, 모임을 나갔거나 탈퇴해 구성원 행이 없으면 "탈퇴한 사용자" (명세 4-3)
+    // #50 전에 만든 정산은 대상 검증이 없어 다른 모임 구성원 ID가 있을 수 있으므로, 같은 모임 구성원만 이름 표시
+    private fun toPaymentResponses(meetingId: Long, payments: List<SettlementMember>): List<PaymentResponse> {
+        val membersById = memberRepository.findAllById(payments.map { it.memberId }.toSet())
+            .filter { it.meetingId == meetingId }
+            .associateBy { it.id }
+        val usersById = appUserRepository.findAllById(membersById.values.map { it.userId }).associateBy { it.id }
 
-    // 모임 존재 여부 검증 함수 (추후 Meeting 도메인 연동 자리, #50)
-    private fun validateMeeting(meetingId: Long) {
-        // TODO: 모임이 없거나 삭제되었으면 404 NOT_FOUND
+        return payments.map { payment ->
+            PaymentResponse(
+                paymentId = checkNotNull(payment.id) { "납부 항목 식별자가 없습니다." },
+                memberId = payment.memberId,
+                userName = membersById[payment.memberId]?.let { usersById[it.userId] }?.name ?: WITHDRAWN_USER_NAME,
+                amount = payment.amount,
+                status = payment.status,
+                submittedAt = payment.submittedAt?.withOffsetSameInstant(KST)
+            )
+        }
     }
 
-    // 관리자 권한 검증 함수 (추후 Member 도메인 연동 자리, #50)
-    private fun validateAdmin(meetingId: Long, memberId: Long) {
-        // TODO: 모임의 ADMIN이 아니면 403 FORBIDDEN
-    }
-
-    // 모임 구성원 권한 검증 함수 (추후 Member 도메인 연동 자리, #50)
-    private fun validateMember(meetingId: Long, memberId: Long) {
-        // TODO: 모임 구성원이 아니면 403 FORBIDDEN
-    }
-
-    // 관리자 여부 판단 (추후 Member 도메인 연동 자리, #50)
-    private fun isAdmin(meetingId: Long, memberId: Long): Boolean {
-        // TODO: 구성원의 role이 ADMIN인지 확인. 연동 전까지 임시 사용자는 관리자로 간주
-        return true
-    }
-
-    // 정산 대상 검증 함수 (추후 Member 도메인 연동 자리, #50)
+    // 정산 대상은 모두 해당 모임의 구성원이어야 함 (아니면 404, 명세 4-1)
     private fun validateTargetMembers(meetingId: Long, memberIds: List<Long>) {
-        // TODO: 대상 구성원이 모두 해당 모임 구성원이 아니면 400 VALIDATION_ERROR
+        val targetCount = memberRepository.findAllById(memberIds).count { it.meetingId == meetingId }
+        if (targetCount != memberIds.size) {
+            throw ApiException(ErrorCode.NOT_FOUND, "정산 대상 구성원을 찾을 수 없습니다.")
+        }
     }
 
-    // 연결 일정 검증 함수 (추후 일정 PR #38 머지 후 연동 자리, #50)
+    // 연결 일정은 해당 모임의 일정이어야 함 (아니면 404, 명세 4-1)
     private fun validateSchedule(meetingId: Long, scheduleId: Long?) {
-        // TODO: scheduleId가 있는데 해당 모임의 일정이 아니면 404 NOT_FOUND
+        if (scheduleId != null && scheduleRepository.findByIdAndMeetingId(scheduleId, meetingId) == null) {
+            throw ApiException(ErrorCode.NOT_FOUND, "연결할 일정을 찾을 수 없습니다.")
+        }
     }
 
     // 정산 안내 공지: 제목은 공지 제목 최대 길이를 넘으면 잘라 쓰고, 내용에는 정산명 전체를 담음
@@ -313,6 +321,7 @@ class SettlementService(
         // API 명세상 응답 일시는 KST(+09:00)
         private val KST: ZoneOffset = ZoneOffset.ofHours(9)
         private const val NOTICE_TITLE_MAX_LENGTH = 50
+        private const val WITHDRAWN_USER_NAME = "탈퇴한 사용자"
         private val NOTICE_DUE_AT_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
     }
 }

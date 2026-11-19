@@ -1,5 +1,6 @@
 package com.teamani.moamoa.settlement.controller
 
+import com.teamani.moamoa.global.auth.CurrentUserId
 import com.teamani.moamoa.global.response.CommonResponse
 import com.teamani.moamoa.settlement.dto.RegularDuesCreateRequest
 import com.teamani.moamoa.settlement.dto.RegularDuesCreateResponse
@@ -28,45 +29,43 @@ class RegularDuesController(
 
     @PostMapping
     fun createRegularDues(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @Valid @RequestBody request: RegularDuesCreateRequest
     ): ResponseEntity<CommonResponse<RegularDuesCreateResponse>> {
-        val currentMemberId = 1L // TODO: 인증·구성원 연동 시 실제 구성원 ID로 교체 (#50)
-
-        val response = regularDuesService.createRegularDues(meetingId, currentMemberId, request)
+        val response = regularDuesService.createRegularDues(meetingId, currentUserId, request)
 
         return ResponseEntity.status(HttpStatus.CREATED).body(CommonResponse(data = response))
     }
 
     @GetMapping
-    fun getRegularDuesList(@PathVariable meetingId: Long): ResponseEntity<CommonResponse<RegularDuesListResponse>> {
-        val currentMemberId = 1L // TODO: 인증·구성원 연동 시 실제 구성원 ID로 교체 (#50)
-
-        return ResponseEntity.ok(CommonResponse(data = regularDuesService.getRegularDuesList(meetingId, currentMemberId)))
+    fun getRegularDuesList(
+        @CurrentUserId currentUserId: Long,
+        @PathVariable meetingId: Long
+    ): ResponseEntity<CommonResponse<RegularDuesListResponse>> {
+        return ResponseEntity.ok(CommonResponse(data = regularDuesService.getRegularDuesList(meetingId, currentUserId)))
     }
 
     @PatchMapping("/{regularDuesId}")
     fun updateRegularDues(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @PathVariable regularDuesId: Long,
         @Valid @RequestBody request: RegularDuesUpdateRequest
     ): ResponseEntity<CommonResponse<RegularDuesResponse>> {
-        val currentMemberId = 1L // TODO: 인증·구성원 연동 시 실제 구성원 ID로 교체 (#50)
-
         return ResponseEntity.ok(
-            CommonResponse(data = regularDuesService.updateRegularDues(meetingId, currentMemberId, regularDuesId, request))
+            CommonResponse(data = regularDuesService.updateRegularDues(meetingId, currentUserId, regularDuesId, request))
         )
     }
 
     @DeleteMapping("/{regularDuesId}")
     fun deleteRegularDues(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @PathVariable regularDuesId: Long
     ): ResponseEntity<CommonResponse<RegularDuesDeleteResponse>> {
-        val currentMemberId = 1L // TODO: 인증·구성원 연동 시 실제 구성원 ID로 교체 (#50)
-
         return ResponseEntity.ok(
-            CommonResponse(data = regularDuesService.deleteRegularDues(meetingId, currentMemberId, regularDuesId))
+            CommonResponse(data = regularDuesService.deleteRegularDues(meetingId, currentUserId, regularDuesId))
         )
     }
 }

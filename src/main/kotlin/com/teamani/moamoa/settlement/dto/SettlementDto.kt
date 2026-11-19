@@ -76,6 +76,9 @@ data class SettlementDetailResponse(
     val settlementId: Long,
     val title: String,
     val scheduleId: Long?,
+    // 연결된 일정의 제목·시작 일시 (연결된 일정이 없으면 null)
+    val scheduleTitle: String?,
+    val scheduleStartAt: OffsetDateTime?,
     val totalAmount: Int,
     val bankName: String,
     val accountNumber: String,
@@ -131,8 +134,8 @@ data class PaymentRejectResponse(
 data class PaymentResponse(
     val paymentId: Long,
     val memberId: Long,
-    // User 도메인 연동 전까지 null
-    val userName: String?,
+    // 모임을 나갔거나 탈퇴한 구성원은 "탈퇴한 사용자"
+    val userName: String,
     val amount: Int,
     val status: PaymentStatus,
     val submittedAt: OffsetDateTime?

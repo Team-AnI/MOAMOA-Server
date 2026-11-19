@@ -2,9 +2,15 @@ package com.teamani.moamoa.settlement.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.member.entity.Member
+import com.teamani.moamoa.member.entity.MemberRole
+import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.notice.dto.NoticeCreateRequest
 import com.teamani.moamoa.notice.dto.NoticeCreateResponse
 import com.teamani.moamoa.notice.service.NoticeService
+import com.teamani.moamoa.schedule.entity.Schedule
+import com.teamani.moamoa.schedule.repository.ScheduleRepository
 import com.teamani.moamoa.settlement.dto.SettlementCreateRequest
 import com.teamani.moamoa.settlement.entity.PaymentStatus
 import com.teamani.moamoa.settlement.entity.Settlement
@@ -12,6 +18,8 @@ import com.teamani.moamoa.settlement.entity.SettlementMember
 import com.teamani.moamoa.settlement.entity.SettlementStatus
 import com.teamani.moamoa.settlement.repository.SettlementMemberRepository
 import com.teamani.moamoa.settlement.repository.SettlementRepository
+import com.teamani.moamoa.user.entity.AppUser
+import com.teamani.moamoa.user.repository.AppUserRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.nulls.shouldBeNull
@@ -20,8 +28,10 @@ import io.kotest.matchers.shouldBe
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyList
+import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.Mockito.`when`
 import org.mockito.Mockito.clearInvocations
+import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
@@ -33,9 +43,46 @@ class SettlementServiceTests : BehaviorSpec({
     val settlementRepository: SettlementRepository = mock(SettlementRepository::class.java)
     val settlementMemberRepository: SettlementMemberRepository = mock(SettlementMemberRepository::class.java)
     val noticeService: NoticeService = mock(NoticeService::class.java)
-    val settlementService = SettlementService(settlementRepository, settlementMemberRepository, noticeService)
+    val memberService: MemberService = mock(MemberService::class.java)
+    val memberRepository: MemberRepository = mock(MemberRepository::class.java)
+    val appUserRepository: AppUserRepository = mock(AppUserRepository::class.java)
+    val scheduleRepository: ScheduleRepository = mock(ScheduleRepository::class.java)
+    val settlementService = SettlementService(
+        settlementRepository,
+        settlementMemberRepository,
+        noticeService,
+        memberService,
+        memberRepository,
+        appUserRepository,
+        scheduleRepository
+    )
 
-    afterEach { clearInvocations(settlementRepository, settlementMemberRepository, noticeService) }
+    // 기본: 사용자 1은 모임 1의 관리자(구성원 1)
+    val admin = Member(id = 1L, meetingId = 1L, userId = 1L, role = MemberRole.ADMIN)
+    `when`(memberService.validateAdmin(1L, 1L)).thenReturn(admin)
+    `when`(memberService.validateMember(1L, 1L)).thenReturn(admin)
+    // 구성원 ID 9000 이상은 다른 모임 구성원, 8000번대는 모임을 나가 구성원 행 없음, 그 외는 모임 1 구성원 (사용자 ID = 구성원 ID + 100)
+    doAnswer { invocation ->
+        invocation.getArgument<Iterable<Long>>(0).filterNot { it in 8000L..8999L }.map { id ->
+            Member(id = id, meetingId = if (id >= 9000L) 2L else 1L, userId = id + 100, role = MemberRole.MEMBER)
+        }
+    }.`when`(memberRepository).findAllById(any())
+    doAnswer { invocation ->
+        invocation.getArgument<Iterable<Long>>(0).map { id ->
+            AppUser(
+                id = id,
+                name = "사용자$id",
+                email = "user$id@moamoa.test",
+                password = "password",
+                termsAgreedAt = OffsetDateTime.parse("2026-10-01T00:00:00Z")
+            )
+        }
+    }.`when`(appUserRepository).findAllById(any())
+    `when`(scheduleRepository.findByIdAndMeetingId(20L, 1L)).thenReturn(
+        Schedule(id = 20L, meetingId = 1L, title = "10월 정기 모임", startsAt = OffsetDateTime.parse("2026-10-11T10:00:00Z"))
+    )
+
+    afterEach { clearInvocations(settlementRepository, settlementMemberRepository, noticeService, memberService) }
 
     fun settlement(id: Long, createdAt: String = "2026-10-14T01:00:00Z", title: String = "10월 정기 모임 식비") = Settlement(
         id = id,
@@ -309,6 +356,7 @@ class SettlementServiceTests : BehaviorSpec({
     }
 
     Given("모임에 정산이 하나도 없을 때") {
+        `when`(memberService.validateMember(2L, 1L)).thenReturn(Member(id = 11L, meetingId = 2L, userId = 1L, role = MemberRole.MEMBER))
         `when`(settlementRepository.findAllByMeetingIdOrderByCreatedAtDescIdDesc(2L)).thenReturn(emptyList())
 
         When("getSettlements 메서드를 호출하면") {
@@ -330,29 +378,47 @@ class SettlementServiceTests : BehaviorSpec({
                     status = PaymentStatus.PENDING, submittedAt = OffsetDateTime.parse("2026-10-15T11:00:00Z")
                 ),
                 SettlementMember(id = 82L, settlementId = 40L, memberId = 5L, amount = 15000, status = PaymentStatus.PAID),
-                SettlementMember(id = 83L, settlementId = 40L, memberId = 9L, amount = 15000)
+                SettlementMember(id = 83L, settlementId = 40L, memberId = 9L, amount = 15000),
+                SettlementMember(id = 84L, settlementId = 40L, memberId = 8001L, amount = 15000),
+                // #50 전 데이터처럼 다른 모임(2) 구성원이 대상에 들어간 경우
+                SettlementMember(id = 85L, settlementId = 40L, memberId = 9001L, amount = 15000)
             )
         )
 
         When("getSettlement 메서드를 호출하면") {
             val response = settlementService.getSettlement(1L, 1L, 40L)
 
-            Then("내 납부 정보, 상태별 요약, 구성원별 납부 목록을 반환한다") {
+            Then("내 납부 정보, 상태별 요약, 연결 일정, 구성원별 납부 목록(이름 포함)을 반환한다") {
                 val myPayment = response.myPayment.shouldNotBeNull()
                 myPayment.paymentId shouldBe 81L
                 myPayment.status shouldBe PaymentStatus.PENDING
 
-                response.summary.totalCount shouldBe 3
-                response.summary.unpaidCount shouldBe 1
+                response.summary.totalCount shouldBe 5
+                response.summary.unpaidCount shouldBe 3
                 response.summary.pendingCount shouldBe 1
                 response.summary.paidCount shouldBe 1
                 response.summary.paidAmount shouldBe 15000
 
                 val payments = response.payments.shouldNotBeNull()
-                payments.map { it.memberId } shouldBe listOf(1L, 5L, 9L)
-                payments[0].userName.shouldBeNull()
+                payments.map { it.memberId } shouldBe listOf(1L, 5L, 9L, 8001L, 9001L)
+                // 모임을 나간 구성원(8001)과 다른 모임 구성원(9001)은 "탈퇴한 사용자"
+                payments.map { it.userName } shouldBe listOf("사용자101", "사용자105", "사용자109", "탈퇴한 사용자", "탈퇴한 사용자")
                 payments[0].submittedAt.toString() shouldBe "2026-10-15T20:00+09:00"
                 response.noticeId.shouldBeNull()
+                response.scheduleTitle shouldBe "10월 정기 모임"
+                response.scheduleStartAt.toString() shouldBe "2026-10-11T19:00+09:00"
+            }
+        }
+
+        When("일반 구성원(MEMBER)이 조회하면") {
+            `when`(memberService.validateMember(1L, 105L))
+                .thenReturn(Member(id = 5L, meetingId = 1L, userId = 105L, role = MemberRole.MEMBER))
+            val response = settlementService.getSettlement(1L, 105L, 40L)
+
+            Then("본인 납부 정보와 합계만 반환하고 구성원별 납부 목록은 null이다") {
+                response.myPayment.shouldNotBeNull().paymentId shouldBe 82L
+                response.summary.totalCount shouldBe 5
+                response.payments.shouldBeNull()
             }
         }
     }
@@ -496,6 +562,164 @@ class SettlementServiceTests : BehaviorSpec({
 
             Then("NOT_FOUND 예외가 발생한다") {
                 exception.errorCode shouldBe ErrorCode.NOT_FOUND
+            }
+        }
+    }
+
+    Given("구성원 ID와 사용자 ID가 다른 관리자가 정산을 만들 때") {
+        `when`(memberService.validateAdmin(1L, 10L)).thenReturn(Member(id = 3L, meetingId = 1L, userId = 10L, role = MemberRole.ADMIN))
+        `when`(settlementRepository.save(any(Settlement::class.java))).thenReturn(settlement(42L))
+        `when`(noticeService.createNoticeByMember(anyLong(), anyLong(), any(NoticeCreateRequest::class.java) ?: NoticeCreateRequest("t", "c")))
+            .thenReturn(NoticeCreateResponse(noticeId = 14L, title = "[정산] 10월 정기 모임 식비"))
+        val request = SettlementCreateRequest(
+            title = "10월 정기 모임 식비",
+            totalAmount = 10000,
+            memberIds = listOf(3L, 5L),
+            bankName = "국민은행",
+            accountNumber = "123456789012",
+            accountHolder = "김모아",
+            dueAt = OffsetDateTime.parse("2026-10-20T14:59:00Z"),
+            postNotice = true
+        )
+
+        When("createSettlement 메서드를 호출하면") {
+            settlementService.createSettlement(1L, 10L, request)
+
+            Then("사용자 ID가 아닌 관리자의 구성원 ID를 생성자와 안내 공지 작성자로 쓴다") {
+                val captor = ArgumentCaptor.forClass(Settlement::class.java)
+                verify(settlementRepository).save(captor.capture())
+                captor.value.createdBy shouldBe 3L
+                verify(noticeService).createNoticeByMember(
+                    anyLong(),
+                    org.mockito.ArgumentMatchers.eq(3L),
+                    any(NoticeCreateRequest::class.java) ?: NoticeCreateRequest("t", "c")
+                )
+            }
+        }
+    }
+
+    Given("정산 대상이나 연결 일정이 해당 모임에 없을 때") {
+        fun request(memberIds: List<Long>, scheduleId: Long? = null) = SettlementCreateRequest(
+            title = "10월 정기 모임 식비",
+            scheduleId = scheduleId,
+            totalAmount = 10000,
+            memberIds = memberIds,
+            bankName = "국민은행",
+            accountNumber = "123456789012",
+            accountHolder = "김모아",
+            dueAt = OffsetDateTime.parse("2026-10-20T14:59:00Z")
+        )
+
+        listOf(
+            "다른 모임 구성원이 대상에 포함되면" to request(listOf(1L, 9001L)),
+            "다른 모임의 일정을 연결하면" to request(listOf(1L, 5L), scheduleId = 21L)
+        ).forEach { (case, request) ->
+            When(case) {
+                val exception = shouldThrow<ApiException> { settlementService.createSettlement(1L, 1L, request) }
+
+                Then("NOT_FOUND 예외가 발생하고 정산을 저장하지 않는다") {
+                    exception.errorCode shouldBe ErrorCode.NOT_FOUND
+                    verifyNoInteractions(settlementRepository, settlementMemberRepository, noticeService)
+                }
+            }
+        }
+    }
+
+    Given("모임 관리자(ADMIN)가 아닌 사용자가 정산 생성·납부 승인·반려를 요청할 때") {
+        val memberUserId = 2L
+        `when`(memberService.validateAdmin(1L, memberUserId))
+            .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 관리자만 요청할 수 있습니다."))
+        val createRequest = SettlementCreateRequest(
+            title = "10월 정기 모임 식비",
+            totalAmount = 10000,
+            memberIds = listOf(1L, 5L),
+            bankName = "국민은행",
+            accountNumber = "123456789012",
+            accountHolder = "김모아",
+            dueAt = OffsetDateTime.parse("2026-10-20T14:59:00Z")
+        )
+
+        listOf<Pair<String, () -> Any>>(
+            "createSettlement" to { settlementService.createSettlement(1L, memberUserId, createRequest) },
+            "approvePayment" to { settlementService.approvePayment(1L, memberUserId, 40L, 81L) },
+            "rejectPayment" to { settlementService.rejectPayment(1L, memberUserId, 40L, 81L, null) }
+        ).forEach { (method, call) ->
+            When("$method 메서드를 호출하면") {
+                val exception = shouldThrow<ApiException> { call() }
+
+                Then("FORBIDDEN 예외가 발생하고 정산·납부 항목을 조회·저장하지 않는다") {
+                    exception.errorCode shouldBe ErrorCode.FORBIDDEN
+                    verify(memberService).validateAdmin(1L, memberUserId)
+                    verifyNoInteractions(settlementRepository, settlementMemberRepository, noticeService)
+                }
+            }
+        }
+    }
+
+    Given("모임 구성원이 아닌 사용자가 정산 목록·상세 조회와 납부 완료 제출을 요청할 때") {
+        val outsiderUserId = 3L
+        `when`(memberService.validateMember(1L, outsiderUserId))
+            .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 구성원만 요청할 수 있습니다."))
+
+        listOf<Pair<String, () -> Any>>(
+            "getSettlements" to { settlementService.getSettlements(1L, outsiderUserId) },
+            "getSettlement" to { settlementService.getSettlement(1L, outsiderUserId, 40L) },
+            "submitPayment" to { settlementService.submitPayment(1L, outsiderUserId, 40L) }
+        ).forEach { (method, call) ->
+            When("$method 메서드를 호출하면") {
+                val exception = shouldThrow<ApiException> { call() }
+
+                Then("FORBIDDEN 예외가 발생하고 정산·납부 항목을 조회하지 않는다") {
+                    exception.errorCode shouldBe ErrorCode.FORBIDDEN
+                    verify(memberService).validateMember(1L, outsiderUserId)
+                    verifyNoInteractions(settlementRepository, settlementMemberRepository)
+                }
+            }
+        }
+    }
+
+    Given("권한이 없는 사용자가 요청만으로 잘못된 정산 생성 요청을 보낼 때") {
+        val outsiderUserId = 4L
+        `when`(memberService.validateAdmin(1L, outsiderUserId))
+            .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 관리자만 요청할 수 있습니다."))
+        val request = SettlementCreateRequest(
+            title = "10월 정기 모임 식비",
+            totalAmount = 10000,
+            memberIds = listOf(1L, 1L),
+            bankName = "국민은행",
+            accountNumber = "123456789012",
+            accountHolder = "김모아",
+            dueAt = OffsetDateTime.parse("2026-10-20T14:59:00Z")
+        )
+
+        When("대상 구성원이 중복된 정산을 생성하면") {
+            val exception = shouldThrow<ApiException> { settlementService.createSettlement(1L, outsiderUserId, request) }
+
+            Then("명세 오류 순서대로 권한(403)보다 요청 오류(400 VALIDATION_ERROR)가 먼저다") {
+                exception.errorCode shouldBe ErrorCode.VALIDATION_ERROR
+                verify(memberService, never()).validateAdmin(1L, outsiderUserId)
+            }
+        }
+    }
+
+    Given("없거나 종료된 모임의 정산을 요청할 때") {
+        val endedMeetingId = 404L
+        `when`(memberService.validateAdmin(endedMeetingId, 1L))
+            .thenThrow(ApiException(ErrorCode.NOT_FOUND, "모임을 찾을 수 없습니다."))
+        `when`(memberService.validateMember(endedMeetingId, 1L))
+            .thenThrow(ApiException(ErrorCode.NOT_FOUND, "모임을 찾을 수 없습니다."))
+
+        listOf<Pair<String, () -> Any>>(
+            "approvePayment" to { settlementService.approvePayment(endedMeetingId, 1L, 40L, 81L) },
+            "getSettlements" to { settlementService.getSettlements(endedMeetingId, 1L) }
+        ).forEach { (method, call) ->
+            When("$method 메서드를 호출하면") {
+                val exception = shouldThrow<ApiException> { call() }
+
+                Then("NOT_FOUND 예외가 발생하고 정산을 조회하지 않는다") {
+                    exception.errorCode shouldBe ErrorCode.NOT_FOUND
+                    verifyNoInteractions(settlementRepository, settlementMemberRepository)
+                }
             }
         }
     }
