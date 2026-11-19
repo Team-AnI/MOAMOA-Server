@@ -8,6 +8,7 @@ import com.teamani.moamoa.member.dto.MemberListResponse
 import com.teamani.moamoa.member.dto.MemberSummaryResponse
 import com.teamani.moamoa.member.entity.MemberRole
 import com.teamani.moamoa.member.service.MemberService
+import com.teamani.moamoa.user.entity.ProfileColor
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import org.mockito.Mockito.`when`
@@ -40,12 +41,12 @@ class MemberControllerTests : BehaviorSpec() {
 
         Given("구성원 목록 조회 요청(GET /v1/meetings/{meetingId}/members)이 주어졌을 때") {
             When("모임 구성원이 요청하면") {
-                Then("200과 구성원 목록을 반환하고 userName은 null로 응답한다") {
+                Then("200과 구성원 목록을 이름·프로필 색과 함께 반환한다") {
                     `when`(memberService.getMembers(1L, USER_ID)).thenReturn(
                         MemberListResponse(
                             listOf(
-                                MemberSummaryResponse(100L, null, MemberRole.ADMIN),
-                                MemberSummaryResponse(200L, null, MemberRole.MEMBER),
+                                MemberSummaryResponse(100L, "김모아", ProfileColor.LIGHT_BLUE, MemberRole.ADMIN),
+                                MemberSummaryResponse(200L, "이모아", ProfileColor.BLUE, MemberRole.MEMBER),
                             )
                         )
                     )
@@ -56,7 +57,9 @@ class MemberControllerTests : BehaviorSpec() {
                         status { isOk() }
                         jsonPath("$.success") { value(true) }
                         jsonPath("$.data.members[0].memberId") { value(100) }
-                        jsonPath("$.data.members[0].userName") { value(null as Any?) }
+                        jsonPath("$.data.members[0].userName") { value("김모아") }
+                        jsonPath("$.data.members[0].profileColor") { value("LIGHT_BLUE") }
+                        jsonPath("$.data.members[1].profileColor") { value("BLUE") }
                         jsonPath("$.data.members[0].role") { value("ADMIN") }
                         jsonPath("$.data.members[1].role") { value("MEMBER") }
                     }

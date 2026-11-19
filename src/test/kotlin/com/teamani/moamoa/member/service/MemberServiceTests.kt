@@ -8,11 +8,13 @@ import com.teamani.moamoa.member.entity.Member
 import com.teamani.moamoa.member.entity.MemberRole
 import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.notice.repository.NoticeReadRepository
+import com.teamani.moamoa.user.entity.AppUser
+import com.teamani.moamoa.user.entity.ProfileColor
+import com.teamani.moamoa.user.repository.AppUserRepository
 import com.teamani.moamoa.vote.repository.VoteRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldHaveSize
-import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyLong
@@ -22,6 +24,7 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.reset
 import org.mockito.Mockito.verify
+import java.time.OffsetDateTime
 
 class MemberServiceTests : BehaviorSpec({
 
@@ -30,7 +33,8 @@ class MemberServiceTests : BehaviorSpec({
     val voteRepository: VoteRepository = mock(VoteRepository::class.java)
     val attendanceRepository: AttendanceRepository = mock(AttendanceRepository::class.java)
     val noticeReadRepository: NoticeReadRepository = mock(NoticeReadRepository::class.java)
-    val memberService = MemberService(meetingRepository, memberRepository, voteRepository, attendanceRepository, noticeReadRepository)
+    val appUserRepository: AppUserRepository = mock(AppUserRepository::class.java)
+    val memberService = MemberService(meetingRepository, memberRepository, voteRepository, attendanceRepository, noticeReadRepository, appUserRepository)
 
     val meetingId = 1L
     val adminUserId = 10L
@@ -89,15 +93,24 @@ class MemberServiceTests : BehaviorSpec({
 
     Given("구성원 목록을 조회할 때") {
         When("모임 구성원이 요청하면") {
-            Then("구성원 id·userName(null)·role 목록을 반환한다") {
+            Then("구성원 id·실제 이름·프로필 색·role 목록을 반환한다") {
                 `when`(memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId)).thenReturn(listOf(admin, member))
+                `when`(appUserRepository.findAllById(listOf(adminUserId, memberUserId))).thenReturn(
+                    listOf(
+                        AppUser(id = adminUserId, name = "김모아", email = "a@moamoa.test", password = "pw", profileColor = ProfileColor.DARK, termsAgreedAt = OffsetDateTime.now()),
+                        AppUser(id = memberUserId, name = "이모아", email = "b@moamoa.test", password = "pw", termsAgreedAt = OffsetDateTime.now())
+                    )
+                )
 
                 val response = memberService.getMembers(meetingId, memberUserId)
 
                 response.members shouldHaveSize 2
                 response.members[0].memberId shouldBe 100L
                 response.members[0].role shouldBe MemberRole.ADMIN
-                response.members[0].userName.shouldBeNull()
+                response.members[0].userName shouldBe "김모아"
+                response.members[0].profileColor shouldBe ProfileColor.DARK
+                response.members[1].userName shouldBe "이모아"
+                response.members[1].profileColor shouldBe ProfileColor.LIGHT_BLUE
                 response.members[1].memberId shouldBe 200L
                 response.members[1].role shouldBe MemberRole.MEMBER
             }

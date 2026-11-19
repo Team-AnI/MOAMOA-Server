@@ -2,9 +2,12 @@ package com.teamani.moamoa.user.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.user.dto.MyInfoResponse
+import com.teamani.moamoa.user.dto.MyInfoUpdateRequest
 import com.teamani.moamoa.user.dto.UserSignUpRequest
 import com.teamani.moamoa.user.dto.UserSignUpResponse
 import com.teamani.moamoa.user.entity.AppUser
+import com.teamani.moamoa.user.entity.ProfileColor
 import com.teamani.moamoa.user.repository.AppUserRepository
 import org.hibernate.exception.ConstraintViolationException
 import org.springframework.dao.DataIntegrityViolationException
@@ -58,6 +61,41 @@ class UserService(
             refreshToken = tokens.refreshToken
         )
     }
+
+    @Transactional(readOnly = true)
+    fun getMyInfo(userId: Long): MyInfoResponse =
+        toMyInfoResponse(activeUser(appUserRepository.findById(userId).orElse(null)))
+
+    // 같은 사용자의 동시 수정이 서로 다른 항목을 이전 값으로 덮어쓰지 않도록 사용자 잠금 조회
+    @Transactional
+    fun updateMyInfo(userId: Long, request: MyInfoUpdateRequest): MyInfoResponse {
+        val user = activeUser(appUserRepository.findByIdForUpdate(userId))
+
+        // 이름·프로필 색의 null 전송은 DTO 검증에서 거부되므로 여기서는 값이 있거나 미전송인 경우만 남음
+        user.updateProfile(
+            name = request.name?.orElse(null),
+            phone = request.phone,
+            profileColor = request.profileColor?.orElse(null)?.let { ProfileColor.valueOf(it) }
+        )
+
+        return toMyInfoResponse(user)
+    }
+
+    // 탈퇴한 사용자의 액세스 토큰은 만료 전까지 유효하므로, 없거나 탈퇴한 사용자는 인증되지 않은 요청(401)으로 처리
+    private fun activeUser(user: AppUser?): AppUser {
+        if (user == null || user.deletedAt != null) {
+            throw ApiException(ErrorCode.UNAUTHORIZED)
+        }
+        return user
+    }
+
+    private fun toMyInfoResponse(user: AppUser) = MyInfoResponse(
+        userId = checkNotNull(user.id) { "사용자 식별자가 없습니다." },
+        name = user.name,
+        email = user.email,
+        phone = user.phone,
+        profileColor = user.profileColor
+    )
 
     // 사용 중인 이메일과 탈퇴 후 재가입 제한 기간의 이메일은 가입 불가
     private fun validateSignUpEmail(email: String) {
