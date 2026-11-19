@@ -119,7 +119,8 @@ class VoteService(
         scheduleId: Long,
         request: MyVoteSubmitRequest
     ): MyVoteSubmitResponse {
-        val me = memberService.validateMember(meetingId, userId)
+        // 요청한 구성원을 잠가, 제출 중에 모임을 나가 투표 응답이 남는 일을 막음 (잠금 순서: 구성원 → 일정)
+        val me = memberService.validateMemberForUpdate(meetingId, userId)
         val myMemberId = checkNotNull(me.id) { "구성원 식별자가 없습니다." }
         val schedule = findScheduleForUpdate(meetingId, scheduleId)
         val votes = findVotes(scheduleId)

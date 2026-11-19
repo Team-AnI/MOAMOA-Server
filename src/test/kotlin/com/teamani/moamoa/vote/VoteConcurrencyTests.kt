@@ -7,6 +7,7 @@ import com.teamani.moamoa.meeting.repository.MeetingRepository
 import com.teamani.moamoa.member.entity.Member
 import com.teamani.moamoa.member.entity.MemberRole
 import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.schedule.entity.Schedule
 import com.teamani.moamoa.schedule.entity.ScheduleStatus
 import com.teamani.moamoa.schedule.repository.ScheduleRepository
@@ -42,7 +43,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
-// 실제 트랜잭션·DB에서 같은 일정의 투표 제출·확정·일정 삭제가 동시에 들어올 때 일정 단위로 순서대로 처리되는지 검증
+// 실제 트랜잭션·DB에서 같은 일정의 투표 제출·확정·일정 삭제가 동시에 들어올 때 일정 단위로 순서대로 처리되는지,
+// 투표 제출과 그 구성원의 모임 나가기가 동시에 들어올 때 구성원 단위로 순서대로 처리되는지 검증
 @SpringBootTest
 @ActiveProfiles("test")
 class VoteConcurrencyTests : BehaviorSpec() {
@@ -54,6 +56,9 @@ class VoteConcurrencyTests : BehaviorSpec() {
 
     @Autowired
     lateinit var scheduleService: ScheduleService
+
+    @Autowired
+    lateinit var memberService: MemberService
 
     @Autowired
     lateinit var meetingRepository: MeetingRepository
@@ -192,6 +197,72 @@ class VoteConcurrencyTests : BehaviorSpec() {
                     }
                     scheduleRepository.findById(vote.scheduleId).isPresent shouldBe false
                     voteRepository.findAllByScheduleId(vote.scheduleId) shouldBe emptyList()
+                }
+            }
+
+            When("투표 제출이 구성원과 일정을 잠근 직후 그 구성원의 모임 나가기가 들어오면") {
+                Then("나가기는 제출이 끝날 때까지 기다린 뒤 처리되고, 나간 구성원의 투표 응답이 남지 않는다") {
+                    val vote = savedVote("RACE0106")
+                    // 제출이 구성원·일정을 잠그고 기존 응답을 지우기 직전에 멈춤
+                    val pause = Pause()
+                    doAnswer(beforeReal(pause::hold)).`when`(voteRepository).deleteAllByScheduleIdAndMemberId(anyLong(), anyLong())
+                    val submitRequest = MyVoteSubmitRequest(listOf(firstTime))
+                    val executor = Executors.newFixedThreadPool(2)
+
+                    try {
+                        val submit = executor.start {
+                            voteService.submitMyVote(vote.meetingId, MEMBER_USER_ID, vote.scheduleId, submitRequest)
+                        }
+                        pause.awaitPaused()
+                        val leave = executor.start {
+                            memberService.leaveMeeting(vote.meetingId, MEMBER_USER_ID)
+                        }
+
+                        shouldThrow<TimeoutException> { leave.get(WAIT_MILLIS, TimeUnit.MILLISECONDS) }
+                        pause.release()
+
+                        submit.get(10, TimeUnit.SECONDS).shouldBeNull()
+                        leave.get(10, TimeUnit.SECONDS).shouldBeNull()
+                    } finally {
+                        pause.release()
+                        executor.shutdownNow()
+                    }
+                    reset(voteRepository)
+                    memberRepository.findById(vote.memberId).isPresent shouldBe false
+                    respondedRows(vote) shouldBe emptyList()
+                }
+            }
+
+            When("모임 나가기가 구성원을 잠근 직후 그 구성원의 투표 제출이 들어오면") {
+                Then("제출은 나가기가 끝날 때까지 기다린 뒤 403이고, 나간 구성원의 투표 응답은 생기지 않는다") {
+                    val vote = savedVote("RACE0107")
+                    // 나가기가 구성원을 잠그고 투표 응답을 지우기 직전에 멈춤
+                    val pause = Pause()
+                    doAnswer(beforeReal(pause::hold)).`when`(voteRepository).deleteAllByMemberId(anyLong())
+                    val submitRequest = MyVoteSubmitRequest(listOf(firstTime))
+                    val executor = Executors.newFixedThreadPool(2)
+
+                    try {
+                        val leave = executor.start {
+                            memberService.leaveMeeting(vote.meetingId, MEMBER_USER_ID)
+                        }
+                        pause.awaitPaused()
+                        val submit = executor.start {
+                            voteService.submitMyVote(vote.meetingId, MEMBER_USER_ID, vote.scheduleId, submitRequest)
+                        }
+
+                        shouldThrow<TimeoutException> { submit.get(WAIT_MILLIS, TimeUnit.MILLISECONDS) }
+                        pause.release()
+
+                        leave.get(10, TimeUnit.SECONDS).shouldBeNull()
+                        (submit.get(10, TimeUnit.SECONDS) as ApiException).errorCode shouldBe ErrorCode.FORBIDDEN
+                    } finally {
+                        pause.release()
+                        executor.shutdownNow()
+                    }
+                    reset(voteRepository)
+                    memberRepository.findById(vote.memberId).isPresent shouldBe false
+                    respondedRows(vote) shouldBe emptyList()
                 }
             }
 

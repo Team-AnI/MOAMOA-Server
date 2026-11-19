@@ -27,9 +27,12 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.hibernate.exception.ConstraintViolationException
 import org.mockito.ArgumentCaptor
+import org.mockito.ArgumentMatchers.anyCollection
 import org.mockito.ArgumentMatchers.anyList
 import org.mockito.ArgumentMatchers.anyLong
+import org.mockito.ArgumentMatchers.eq
 import org.mockito.Mockito.`when`
+import org.mockito.Mockito.inOrder
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.reset
@@ -93,9 +96,27 @@ class AttendanceServiceTests : BehaviorSpec({
             `when`(memberRepository.findByMeetingIdAndUserId(meetingId, it.userId)).thenReturn(it)
         }
         `when`(memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId)).thenReturn(listOf(admin, member, quietMember))
+        // 출석 대상 구성원 잠금 조회: 요청한 ID 중 이 모임 구성원만 반환 (다른 모임 구성원은 조회되지 않음)
+        `when`(memberRepository.findAllByMeetingIdAndIdInForUpdate(eq(meetingId), anyCollection())).thenAnswer { invocation ->
+            val ids = invocation.getArgument<Collection<Long>>(1)
+            listOf(admin, member, quietMember).filter { it.id in ids }
+        }
     }
 
     Given("출석 처리 요청이 주어졌을 때") {
+        When("ADMIN이 여러 구성원의 출석을 보내면") {
+            Then("출석 대상 구성원을 잠근 뒤 일정을 잠근다 (모임 나가기·투표 제출과 같은 구성원 → 일정 순서)") {
+                stubSchedule(schedule())
+
+                attendanceService.updateAttendances(
+                    meetingId, adminUserId, scheduleId, request(300L to "ABSENT", 200L to "LATE")
+                )
+
+                val lockOrder = inOrder(memberRepository, scheduleRepository)
+                lockOrder.verify(memberRepository).findAllByMeetingIdAndIdInForUpdate(meetingId, setOf(300L, 200L))
+                lockOrder.verify(scheduleRepository).findByIdAndMeetingIdForUpdate(scheduleId, meetingId)
+            }
+        }
         When("ADMIN이 처음 체크하는 구성원과 이미 체크한 구성원을 함께 보내면") {
             Then("기존 기록은 상태와 변경 일시만 바꾸고 새 기록을 만들며, 보낸 항목을 요청 순서대로 반환한다") {
                 val checked = attendance(200L, AttendanceStatus.PRESENT)

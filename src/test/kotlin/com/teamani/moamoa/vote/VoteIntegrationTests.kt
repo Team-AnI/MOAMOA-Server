@@ -99,6 +99,7 @@ class VoteIntegrationTests : BehaviorSpec() {
 
                     // 5-1 투표 생성 (후보를 다른 표기와 역순으로 전달)
                     val createResult = mockMvc.post("/v1/meetings/$meetingId/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"title":"11월 정기 모임","voteDeadlineAt":"$deadline",""" +
                             """"meetingTimes":["$secondTime","$firstTimeUtc"]}"""
@@ -116,10 +117,12 @@ class VoteIntegrationTests : BehaviorSpec() {
 
                     // 5-3 첫 제출 후 다른 표기로 재제출
                     mockMvc.put("/v1/meetings/$meetingId/schedules/$scheduleId/votes/me") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"meetingTimes":["$firstTime"]}"""
                     }.andExpect { status { isOk() } }
                     mockMvc.put("/v1/meetings/$meetingId/schedules/$scheduleId/votes/me") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"meetingTimes":["$secondTimeUtc"]}"""
                     }.andExpect {
@@ -132,7 +135,9 @@ class VoteIntegrationTests : BehaviorSpec() {
                         listOf(VoteStatus.UNAVAILABLE, VoteStatus.AVAILABLE)
 
                     // 5-2 투표 현황
-                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/candidates").andExpect {
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/candidates") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.votingOpen") { value(true) }
                         jsonPath("$.data.memberCount") { value(2) }
@@ -144,6 +149,7 @@ class VoteIntegrationTests : BehaviorSpec() {
 
                     // 5-5 마감 전 확정
                     mockMvc.post("/v1/meetings/$meetingId/schedules/$scheduleId/confirmation") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"meetingTime":"$secondTimeUtc"}"""
                     }.andExpect {
@@ -157,12 +163,15 @@ class VoteIntegrationTests : BehaviorSpec() {
                     confirmedSchedule.startsAt.toInstant() shouldBe secondTime.toInstant()
 
                     // 확정 후에도 현황 조회 가능, 제출은 거절되고 기존 선택 유지
-                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/candidates").andExpect {
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/candidates") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.status") { value("CONFIRMED") }
                         jsonPath("$.data.votingOpen") { value(false) }
                     }
                     mockMvc.put("/v1/meetings/$meetingId/schedules/$scheduleId/votes/me") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"meetingTimes":["$firstTime"]}"""
                     }.andExpect {
@@ -184,7 +193,9 @@ class VoteIntegrationTests : BehaviorSpec() {
                         scheduleRepository.save(Schedule(meetingId = meetingId, title = "직접 등록 일정", startsAt = firstTime)).id
                     )
 
-                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/candidates").andExpect {
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/candidates") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
+                    }.andExpect {
                         status { isNotFound() }
                         jsonPath("$.error.code") { value("NOT_FOUND") }
                     }
@@ -233,6 +244,108 @@ class VoteIntegrationTests : BehaviorSpec() {
             }
         }
 
+        Given("서로 다른 사용자가 같은 투표에 응답할 때") {
+            When("각자의 액세스 토큰으로 제출하면") {
+                Then("토큰의 사용자가 속한 구성원으로 저장되고 다른 구성원의 행은 바뀌지 않는다") {
+                    val meetingId = checkNotNull(meetingRepository.save(Meeting(name = "모아모아", inviteCode = "VOTE0005")).id)
+                    val adminMemberId = checkNotNull(
+                        memberRepository.save(Member(meetingId = meetingId, userId = USER_ID, role = MemberRole.ADMIN)).id
+                    )
+                    val otherMemberId = checkNotNull(
+                        memberRepository.save(Member(meetingId = meetingId, userId = OTHER_USER_ID, role = MemberRole.MEMBER)).id
+                    )
+                    val scheduleId = checkNotNull(
+                        scheduleRepository.save(
+                            Schedule(
+                                meetingId = meetingId,
+                                title = "11월 정기 모임",
+                                startsAt = firstTime,
+                                status = ScheduleStatus.VOTING
+                            )
+                        ).id
+                    )
+                    val deadline = OffsetDateTime.now().plusDays(1)
+                    voteRepository.saveAll(
+                        listOf(firstTime, secondTime).map {
+                            Vote(adminMemberId, scheduleId, it, VoteStatus.PENDING, endedAt = deadline)
+                        }
+                    )
+
+                    mockMvc.put("/v1/meetings/$meetingId/schedules/$scheduleId/votes/me") {
+                        header(HttpHeaders.AUTHORIZATION, bearer(OTHER_USER_ID))
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{"meetingTimes":["$firstTime"]}"""
+                    }.andExpect { status { isOk() } }
+
+                    votesOf(scheduleId, otherMemberId).map { it.status } shouldContainExactly
+                        listOf(VoteStatus.AVAILABLE, VoteStatus.UNAVAILABLE)
+                    votesOf(scheduleId, adminMemberId).map { it.status } shouldContainExactly
+                        listOf(VoteStatus.PENDING, VoteStatus.PENDING)
+
+                    // 투표 현황의 내 선택은 요청한 사용자 기준
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/candidates") {
+                        header(HttpHeaders.AUTHORIZATION, bearer(OTHER_USER_ID))
+                    }.andExpect {
+                        status { isOk() }
+                        jsonPath("$.data.candidates[0].selectedByMe") { value(true) }
+                    }
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/candidates") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
+                    }.andExpect {
+                        status { isOk() }
+                        jsonPath("$.data.candidates[0].selectedByMe") { value(false) }
+                    }
+                }
+            }
+        }
+
+        Given("액세스 토큰 없이 투표 API를 요청할 때") {
+            When("투표 생성과 내 투표 제출을 요청하면") {
+                Then("401 UNAUTHORIZED를 응답하고 일정과 투표 응답이 저장되지 않는다") {
+                    val meetingId = checkNotNull(meetingRepository.save(Meeting(name = "모아모아", inviteCode = "VOTE0006")).id)
+                    val adminMemberId = checkNotNull(
+                        memberRepository.save(Member(meetingId = meetingId, userId = USER_ID, role = MemberRole.ADMIN)).id
+                    )
+                    val scheduleId = checkNotNull(
+                        scheduleRepository.save(
+                            Schedule(
+                                meetingId = meetingId,
+                                title = "11월 정기 모임",
+                                startsAt = firstTime,
+                                status = ScheduleStatus.VOTING
+                            )
+                        ).id
+                    )
+                    val deadline = OffsetDateTime.now(ZoneOffset.UTC).plusDays(1).truncatedTo(ChronoUnit.SECONDS)
+                    voteRepository.saveAll(
+                        listOf(firstTime, secondTime).map {
+                            Vote(adminMemberId, scheduleId, it, VoteStatus.PENDING, endedAt = deadline)
+                        }
+                    )
+
+                    mockMvc.post("/v1/meetings/$meetingId/schedule-votes") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{"title":"12월 정기 모임","voteDeadlineAt":"$deadline","meetingTimes":["$secondTime"]}"""
+                    }.andExpect {
+                        status { isUnauthorized() }
+                        jsonPath("$.error.code") { value("UNAUTHORIZED") }
+                    }
+                    mockMvc.put("/v1/meetings/$meetingId/schedules/$scheduleId/votes/me") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{"meetingTimes":["$firstTime"]}"""
+                    }.andExpect {
+                        status { isUnauthorized() }
+                        jsonPath("$.error.code") { value("UNAUTHORIZED") }
+                    }
+
+                    scheduleRepository.findAll().filter { it.meetingId == meetingId }.map { it.id } shouldContainExactly
+                        listOf(scheduleId)
+                    votesOf(scheduleId, adminMemberId).map { it.status } shouldContainExactly
+                        listOf(VoteStatus.PENDING, VoteStatus.PENDING)
+                }
+            }
+        }
+
         Given("투표에 응답한 MEMBER가 있을 때") {
             When("그 구성원이 모임을 탈퇴하면") {
                 Then("그 구성원의 투표 응답이 함께 삭제되고 다른 구성원의 행은 유지된다") {
@@ -277,8 +390,12 @@ class VoteIntegrationTests : BehaviorSpec() {
         }
     }
 
+    // 요청 사용자의 액세스 토큰으로 만든 Authorization 헤더 값
+    private fun bearer(userId: Long = USER_ID): String = "Bearer ${jwtTokenProvider.createAccessToken(userId)}"
+
     companion object {
-        // Controller 임시 로그인 사용자 (currentUserId = 1L)
+        // 기본 요청 사용자 (bearer()의 기본값)
         private const val USER_ID = 1L
+        private const val OTHER_USER_ID = 2L
     }
 }

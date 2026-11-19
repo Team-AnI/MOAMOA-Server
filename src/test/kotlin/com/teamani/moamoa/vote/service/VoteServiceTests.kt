@@ -126,6 +126,7 @@ class VoteServiceTests : BehaviorSpec({
         `when`(meetingRepository.existsByIdAndEndedAtIsNull(meetingId)).thenReturn(true)
         listOf(admin, member, quietMember, lateMember).forEach {
             `when`(memberRepository.findByMeetingIdAndUserId(meetingId, it.userId)).thenReturn(it)
+            `when`(memberRepository.findByMeetingIdAndUserIdForUpdate(meetingId, it.userId)).thenReturn(it)
         }
     }
 
@@ -301,7 +302,10 @@ class VoteServiceTests : BehaviorSpec({
 
                 val response = voteService.submitMyVote(meetingId, memberUserId, scheduleId, request)
 
-                verify(scheduleRepository).findByIdAndMeetingIdForUpdate(scheduleId, meetingId)
+                // 모임 나가기와 같은 구성원 잠금을 일정 잠금보다 먼저 획득
+                val lockOrder = inOrder(memberRepository, scheduleRepository)
+                lockOrder.verify(memberRepository).findByMeetingIdAndUserIdForUpdate(meetingId, memberUserId)
+                lockOrder.verify(scheduleRepository).findByIdAndMeetingIdForUpdate(scheduleId, meetingId)
                 val order = inOrder(voteRepository)
                 order.verify(voteRepository).deleteAllByScheduleIdAndMemberId(scheduleId, 200L)
                 order.verify(voteRepository).saveAllAndFlush(anyList<Vote>())

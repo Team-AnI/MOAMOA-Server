@@ -1,5 +1,6 @@
 package com.teamani.moamoa.vote.controller
 
+import com.teamani.moamoa.global.auth.CurrentUserId
 import com.teamani.moamoa.global.response.CommonResponse
 import com.teamani.moamoa.vote.dto.MyVoteSubmitRequest
 import com.teamani.moamoa.vote.dto.MyVoteSubmitResponse
@@ -28,11 +29,10 @@ class VoteController(
 
     @PostMapping("/v1/meetings/{meetingId}/schedule-votes")
     fun createVote(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @Valid @RequestBody request: VoteCreateRequest
     ): ResponseEntity<CommonResponse<VoteCreateResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: VoteCreateResponse = voteService.createVote(meetingId, currentUserId, request)
 
         return ResponseEntity.status(HttpStatus.CREATED).body(CommonResponse(data = response))
@@ -40,11 +40,10 @@ class VoteController(
 
     @GetMapping("/v1/meetings/{meetingId}/schedules/{scheduleId}/candidates")
     fun getVote(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @PathVariable scheduleId: Long
     ): ResponseEntity<CommonResponse<VoteDetailResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: VoteDetailResponse = voteService.getVote(meetingId, currentUserId, scheduleId)
 
         return ResponseEntity.ok(CommonResponse(data = response))
@@ -52,12 +51,11 @@ class VoteController(
 
     @PutMapping("/v1/meetings/{meetingId}/schedules/{scheduleId}/votes/me")
     fun submitMyVote(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @PathVariable scheduleId: Long,
         @Valid @RequestBody request: MyVoteSubmitRequest
     ): ResponseEntity<CommonResponse<MyVoteSubmitResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: MyVoteSubmitResponse = voteService.submitMyVote(meetingId, currentUserId, scheduleId, request)
 
         return ResponseEntity.ok(CommonResponse(data = response))
@@ -65,11 +63,10 @@ class VoteController(
 
     @GetMapping("/v1/meetings/{meetingId}/schedules/{scheduleId}/vote-responses")
     fun getVoteParticipation(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @PathVariable scheduleId: Long
     ): ResponseEntity<CommonResponse<VoteParticipationResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: VoteParticipationResponse =
             voteService.getVoteParticipation(meetingId, currentUserId, scheduleId)
 
@@ -78,12 +75,11 @@ class VoteController(
 
     @PostMapping("/v1/meetings/{meetingId}/schedules/{scheduleId}/confirmation")
     fun confirmVote(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @PathVariable scheduleId: Long,
         @Valid @RequestBody request: VoteConfirmRequest
     ): ResponseEntity<CommonResponse<VoteConfirmResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: VoteConfirmResponse = voteService.confirmVote(meetingId, currentUserId, scheduleId, request)
 
         return ResponseEntity.ok(CommonResponse(data = response))

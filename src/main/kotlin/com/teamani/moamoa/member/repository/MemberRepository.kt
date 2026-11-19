@@ -16,6 +16,11 @@ interface MemberRepository : JpaRepository<Member, Long> {
     @Query("select m from Member m where m.meetingId = :meetingId and m.userId = :userId")
     fun findByMeetingIdAndUserIdForUpdate(@Param("meetingId") meetingId: Long, @Param("userId") userId: Long): Member?
 
+    // 출석 처리와 대상 구성원의 모임 나가기를 구성원 단위로 직렬화 (여러 명은 id 순서로 잠가 요청끼리 교착되지 않게 함)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from Member m where m.meetingId = :meetingId and m.id in :ids order by m.id")
+    fun findAllByMeetingIdAndIdInForUpdate(@Param("meetingId") meetingId: Long, @Param("ids") ids: Collection<Long>): List<Member>
+
     fun existsByMeetingIdAndUserId(meetingId: Long, userId: Long): Boolean
 
     fun findAllByUserIdOrderByIdAsc(userId: Long): List<Member>

@@ -4,11 +4,14 @@ import com.teamani.moamoa.attendance.dto.AttendanceUpdateItemRequest
 import com.teamani.moamoa.attendance.dto.AttendanceUpdateRequest
 import com.teamani.moamoa.attendance.repository.AttendanceRepository
 import com.teamani.moamoa.attendance.service.AttendanceService
+import com.teamani.moamoa.global.exception.ApiException
+import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.meeting.entity.Meeting
 import com.teamani.moamoa.meeting.repository.MeetingRepository
 import com.teamani.moamoa.member.entity.Member
 import com.teamani.moamoa.member.entity.MemberRole
 import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.schedule.entity.Schedule
 import com.teamani.moamoa.schedule.repository.ScheduleRepository
 import com.teamani.moamoa.schedule.service.ScheduleService
@@ -36,7 +39,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
-// 실제 트랜잭션·DB에서 같은 일정의 출석 처리와 일정 삭제가 동시에 들어올 때 일정 단위로 순서대로 처리되는지 검증
+// 실제 트랜잭션·DB에서 같은 일정의 출석 처리와 일정 삭제가 동시에 들어올 때 일정 단위로 순서대로 처리되는지,
+// 출석 처리와 출석 대상 구성원의 모임 나가기가 동시에 들어올 때 구성원 단위로 순서대로 처리되는지 검증
 @SpringBootTest
 @ActiveProfiles("test")
 class AttendanceConcurrencyTests : BehaviorSpec() {
@@ -48,6 +52,9 @@ class AttendanceConcurrencyTests : BehaviorSpec() {
 
     @Autowired
     lateinit var scheduleService: ScheduleService
+
+    @Autowired
+    lateinit var memberService: MemberService
 
     @Autowired
     lateinit var meetingRepository: MeetingRepository
@@ -102,6 +109,72 @@ class AttendanceConcurrencyTests : BehaviorSpec() {
                     reset(attendanceRepository)
                     scheduleRepository.findById(saved.scheduleId).isPresent shouldBe false
                     attendanceRepository.findAll().filter { it.scheduleId == saved.scheduleId } shouldBe emptyList()
+                }
+            }
+
+            When("출석 처리가 대상 구성원과 일정을 잠근 직후 그 구성원의 모임 나가기가 들어오면") {
+                Then("나가기는 출석 처리가 끝날 때까지 기다린 뒤 처리되고, 나간 구성원의 출석 기록이 남지 않는다") {
+                    val saved = savedSchedule("RACE0202")
+                    // 출석 처리가 구성원·일정을 잠그고 기존 출석 기록을 읽기 직전에 멈춤
+                    val pause = Pause()
+                    doAnswer(beforeReal(pause::hold)).`when`(attendanceRepository).findAllByScheduleId(anyLong())
+                    val request = AttendanceUpdateRequest(listOf(AttendanceUpdateItemRequest(saved.memberId, "PRESENT")))
+                    val executor = Executors.newFixedThreadPool(2)
+
+                    try {
+                        val update = executor.start {
+                            attendanceService.updateAttendances(saved.meetingId, ADMIN_USER_ID, saved.scheduleId, request)
+                        }
+                        pause.awaitPaused()
+                        val leave = executor.start {
+                            memberService.leaveMeeting(saved.meetingId, MEMBER_USER_ID)
+                        }
+
+                        shouldThrow<TimeoutException> { leave.get(WAIT_MILLIS, TimeUnit.MILLISECONDS) }
+                        pause.release()
+
+                        update.get(10, TimeUnit.SECONDS).shouldBeNull()
+                        leave.get(10, TimeUnit.SECONDS).shouldBeNull()
+                    } finally {
+                        pause.release()
+                        executor.shutdownNow()
+                    }
+                    reset(attendanceRepository)
+                    memberRepository.findById(saved.memberId).isPresent shouldBe false
+                    attendanceRepository.findAll().filter { it.memberId == saved.memberId } shouldBe emptyList()
+                }
+            }
+
+            When("모임 나가기가 구성원을 잠근 직후 그 구성원의 출석 처리가 들어오면") {
+                Then("출석 처리는 나가기가 끝날 때까지 기다린 뒤 404이고, 나간 구성원의 출석 기록은 생기지 않는다") {
+                    val saved = savedSchedule("RACE0203")
+                    // 나가기가 구성원을 잠그고 출석 기록을 지우기 직전에 멈춤
+                    val pause = Pause()
+                    doAnswer(beforeReal(pause::hold)).`when`(attendanceRepository).deleteAllByMemberId(anyLong())
+                    val request = AttendanceUpdateRequest(listOf(AttendanceUpdateItemRequest(saved.memberId, "PRESENT")))
+                    val executor = Executors.newFixedThreadPool(2)
+
+                    try {
+                        val leave = executor.start {
+                            memberService.leaveMeeting(saved.meetingId, MEMBER_USER_ID)
+                        }
+                        pause.awaitPaused()
+                        val update = executor.start {
+                            attendanceService.updateAttendances(saved.meetingId, ADMIN_USER_ID, saved.scheduleId, request)
+                        }
+
+                        shouldThrow<TimeoutException> { update.get(WAIT_MILLIS, TimeUnit.MILLISECONDS) }
+                        pause.release()
+
+                        leave.get(10, TimeUnit.SECONDS).shouldBeNull()
+                        (update.get(10, TimeUnit.SECONDS) as ApiException).errorCode shouldBe ErrorCode.NOT_FOUND
+                    } finally {
+                        pause.release()
+                        executor.shutdownNow()
+                    }
+                    reset(attendanceRepository)
+                    memberRepository.findById(saved.memberId).isPresent shouldBe false
+                    attendanceRepository.findAll().filter { it.memberId == saved.memberId } shouldBe emptyList()
                 }
             }
         }

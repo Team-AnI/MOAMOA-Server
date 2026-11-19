@@ -38,17 +38,20 @@ class AttendanceService(
         request: AttendanceUpdateRequest
     ): AttendanceUpdateResponse {
         memberService.validateAdmin(meetingId, userId)
-        val schedule = findScheduleForUpdate(meetingId, scheduleId)
 
         val items = requireNotNull(request.attendances) { "출석 목록은 1개 이상이어야 합니다." }
             .map { requireNotNull(it) { "출석 항목은 null일 수 없습니다." } }
         val memberIds = items.map { requireNotNull(it.memberId) { "구성원 ID는 필수입니다." } }
 
-        // 하위 리소스 404 → 상태 422 → 그 외 400 순서로 확인 (README 예외 처리 규칙)
-        val meetingMemberIds = memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId)
+        // 출석 대상 구성원을 잠가, 처리 중에 대상 구성원이 모임을 나가 출석 기록이 남는 일을 막음
+        // 잠금 순서는 모임 나가기·투표 제출과 같은 구성원 → 일정 (이미 나간 구성원은 조회되지 않아 아래에서 404)
+        val lockedMemberIds = memberRepository.findAllByMeetingIdAndIdInForUpdate(meetingId, memberIds.toSet())
             .map { checkNotNull(it.id) { "구성원 식별자가 없습니다." } }
             .toSet()
-        if (!meetingMemberIds.containsAll(memberIds)) {
+        val schedule = findScheduleForUpdate(meetingId, scheduleId)
+
+        // 하위 리소스 404 → 상태 422 → 그 외 400 순서로 확인 (README 예외 처리 규칙)
+        if (!lockedMemberIds.containsAll(memberIds)) {
             throw ApiException(ErrorCode.NOT_FOUND, "모임 구성원을 찾을 수 없습니다.")
         }
 
