@@ -359,7 +359,7 @@ class NoticeServiceTests : BehaviorSpec({
 
         When("제목만 보내면") {
             val notice = notice()
-            `when`(noticeRepository.findById(noticeId)).thenReturn(Optional.of(notice))
+            `when`(noticeRepository.findByIdAndMeetingIdForUpdate(noticeId, meetingId)).thenReturn(notice)
             val response = noticeService.updateNotice(meetingId, noticeId, 1L, NoticeUpdateRequest(title = Optional.of("수정된 제목")))
 
             Then("제목만 변경되고 내용은 기존 값이 유지된다") {
@@ -372,7 +372,7 @@ class NoticeServiceTests : BehaviorSpec({
 
         When("내용만 보내면") {
             val notice = notice()
-            `when`(noticeRepository.findById(noticeId)).thenReturn(Optional.of(notice))
+            `when`(noticeRepository.findByIdAndMeetingIdForUpdate(noticeId, meetingId)).thenReturn(notice)
             val response = noticeService.updateNotice(meetingId, noticeId, 1L, NoticeUpdateRequest(content = Optional.of("수정된 내용")))
 
             Then("내용만 변경되고 제목은 기존 값이 유지된다") {
@@ -384,7 +384,7 @@ class NoticeServiceTests : BehaviorSpec({
 
         When("아무 필드도 보내지 않으면") {
             val notice = notice()
-            `when`(noticeRepository.findById(noticeId)).thenReturn(Optional.of(notice))
+            `when`(noticeRepository.findByIdAndMeetingIdForUpdate(noticeId, meetingId)).thenReturn(notice)
             val response = noticeService.updateNotice(meetingId, noticeId, 1L, NoticeUpdateRequest())
 
             Then("변경 없이 기존 값을 반환한다") {
@@ -400,7 +400,7 @@ class NoticeServiceTests : BehaviorSpec({
         val request = NoticeUpdateRequest(title = Optional.of("수정된 제목"))
 
         When("존재하지 않는 공지 ID로 updateNotice를 호출하면") {
-            `when`(noticeRepository.findById(41L)).thenReturn(Optional.empty())
+            `when`(noticeRepository.findByIdAndMeetingIdForUpdate(41L, 1L)).thenReturn(null)
             val exception = shouldThrow<ApiException> {
                 noticeService.updateNotice(1L, 41L, 1L, request)
             }
@@ -411,7 +411,8 @@ class NoticeServiceTests : BehaviorSpec({
         }
 
         When("다른 모임의 공지 ID로 updateNotice를 호출하면") {
-            `when`(noticeRepository.findById(42L)).thenReturn(Optional.of(otherMeetingNotice))
+            // 모임 ID 조건으로 조회해 다른 모임 공지는 찾지 못함
+            `when`(noticeRepository.findByIdAndMeetingIdForUpdate(42L, 1L)).thenReturn(null)
             val exception = shouldThrow<ApiException> {
                 noticeService.updateNotice(1L, 42L, 1L, request)
             }

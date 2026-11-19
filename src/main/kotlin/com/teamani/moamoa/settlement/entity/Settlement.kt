@@ -74,6 +74,17 @@ class Settlement(
     @Column(nullable = true)
     val billingPeriod: LocalDate? = null,
 
+    // 이 정산이 대체한 취소된 정산 ID (취소된 정산 하나에 대체 정산 하나만)
+    @Column(nullable = true, unique = true)
+    val replacesSettlementId: Long? = null,
+
+    // 취소 일시·사유 (취소되지 않았거나 사유 없이 취소하면 NULL)
+    @Column(nullable = true)
+    var canceledAt: OffsetDateTime? = null,
+
+    @Column(nullable = true, length = 255)
+    var cancelReason: String? = null,
+
     // 기본 키 (PK)
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -83,5 +94,12 @@ class Settlement(
     // 대상자 전원이 완납하면 정산 완료
     fun complete() {
         status = SettlementStatus.COMPLETED
+    }
+
+    // 관리자 취소: 정산은 지우지 않고 취소됨으로 남김
+    fun cancel(reason: String?, canceledAt: OffsetDateTime) {
+        status = SettlementStatus.CANCELED
+        this.canceledAt = canceledAt
+        cancelReason = reason
     }
 }

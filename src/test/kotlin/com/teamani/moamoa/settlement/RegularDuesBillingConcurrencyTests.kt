@@ -103,7 +103,7 @@ class RegularDuesBillingConcurrencyTests : BehaviorSpec() {
                         val bill = executor.submit(Callable { billingService.bill(saved.regularDuesId, now) })
                         pause.awaitPaused()
                         val delete = executor.start {
-                            regularDuesService.deleteRegularDues(saved.meetingId, ADMIN_MEMBER_ID, saved.regularDuesId)
+                            regularDuesService.deleteRegularDues(saved.meetingId, ADMIN_USER_ID, saved.regularDuesId)
                         }
 
                         shouldThrow<TimeoutException> { delete.get(WAIT_MILLIS, TimeUnit.MILLISECONDS) }
@@ -135,7 +135,7 @@ class RegularDuesBillingConcurrencyTests : BehaviorSpec() {
                         val bill = executor.submit(Callable { billingService.bill(saved.regularDuesId, now) })
                         pause.awaitPaused()
                         val update = executor.start {
-                            regularDuesService.updateRegularDues(saved.meetingId, ADMIN_MEMBER_ID, saved.regularDuesId, request)
+                            regularDuesService.updateRegularDues(saved.meetingId, ADMIN_USER_ID, saved.regularDuesId, request)
                         }
 
                         shouldThrow<TimeoutException> { update.get(WAIT_MILLIS, TimeUnit.MILLISECONDS) }
@@ -224,13 +224,13 @@ class RegularDuesBillingConcurrencyTests : BehaviorSpec() {
     // 구성원 2명이 있는 모임에 매월 10일 09:00 정기 회비 저장 (등록은 청구일 이전)
     private fun savedDues(): SavedDues {
         val meetingId = checkNotNull(meetingRepository.save(Meeting(name = "모임", inviteCode = UUID.randomUUID().toString().take(8))).id)
-        memberRepository.save(Member(meetingId = meetingId, userId = 100L, role = MemberRole.ADMIN))
+        val adminMemberId = checkNotNull(memberRepository.save(Member(meetingId = meetingId, userId = ADMIN_USER_ID, role = MemberRole.ADMIN)).id)
         memberRepository.save(Member(meetingId = meetingId, userId = 101L, role = MemberRole.MEMBER))
         val regularDuesId = checkNotNull(
             regularDuesRepository.save(
                 RegularDues(
                     meetingId = meetingId,
-                    createdBy = ADMIN_MEMBER_ID,
+                    createdBy = adminMemberId,
                     title = "월 회비",
                     amount = 10000,
                     cycleType = CycleType.MONTHLY,
@@ -281,9 +281,7 @@ class RegularDuesBillingConcurrencyTests : BehaviorSpec() {
         submit(Callable { runCatching { task() }.exceptionOrNull() })
 
     companion object {
-        private const val ADMIN_MEMBER_ID = 1L
-
-        // savedDues()의 ADMIN 구성원 사용자 ID (모임 종료 권한 확인용)
+        // savedDues()의 ADMIN 구성원 사용자 ID (정기 회비 수정·삭제와 모임 종료 권한 확인용)
         private const val ADMIN_USER_ID = 100L
 
         // 다른 요청을 기다리는 시간 (H2 잠금 대기 2초보다 짧게)

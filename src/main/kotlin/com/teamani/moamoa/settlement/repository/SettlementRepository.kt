@@ -34,6 +34,13 @@ interface SettlementRepository : JpaRepository<Settlement, Long> {
     // 공지 상세에 연결된 정산 표시 (안내 공지는 정산 하나에만 연결됨)
     fun findFirstByNoticeId(noticeId: Long): Settlement?
 
+    // 정산 취소 전 연결 공지 ID만 조회 (엔티티를 불러오지 않아, 이후 잠금 조회가 최신 값을 읽음)
+    @Query("select s.noticeId from Settlement s where s.id = :id and s.meetingId = :meetingId")
+    fun findNoticeIdByIdAndMeetingId(id: Long, meetingId: Long): Long?
+
+    // 이 취소된 정산을 대체한 정산 (4-3 replacedBySettlementId, 4-1 중복 대체 확인)
+    fun findByReplacesSettlementId(replacesSettlementId: Long): Settlement?
+
     // 납부 제출·승인·반려를 정산 단위로 직렬화 (트랜잭션이 끝날 때까지 같은 정산의 다른 요청은 대기)
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from Settlement s where s.id = :id and s.meetingId = :meetingId")

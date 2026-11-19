@@ -2,7 +2,10 @@ package com.teamani.moamoa.settlement.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.member.entity.Member
+import com.teamani.moamoa.member.entity.MemberRole
 import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.settlement.dto.RegularDuesCreateRequest
 import com.teamani.moamoa.settlement.dto.RegularDuesUpdateRequest
 import com.teamani.moamoa.settlement.entity.CycleType
@@ -21,6 +24,7 @@ import org.mockito.Mockito.inOrder
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import java.time.LocalTime
 import java.util.Optional
 
@@ -29,9 +33,13 @@ class RegularDuesServiceTests : BehaviorSpec({
     val regularDuesRepository: RegularDuesRepository = mock(RegularDuesRepository::class.java)
     val settlementRepository: SettlementRepository = mock(SettlementRepository::class.java)
     val memberRepository: MemberRepository = mock(MemberRepository::class.java)
-    val regularDuesService = RegularDuesService(regularDuesRepository, settlementRepository, memberRepository)
+    val memberService: MemberService = mock(MemberService::class.java)
+    val regularDuesService = RegularDuesService(regularDuesRepository, settlementRepository, memberRepository, memberService)
 
-    afterEach { clearInvocations(regularDuesRepository, settlementRepository) }
+    // 기본: 사용자 1은 모임 1의 관리자(구성원 1)
+    `when`(memberService.validateAdmin(1L, 1L)).thenReturn(Member(id = 1L, meetingId = 1L, userId = 1L, role = MemberRole.ADMIN))
+
+    afterEach { clearInvocations(regularDuesRepository, settlementRepository, memberService) }
 
     fun regularDues(
         id: Long = 7L,
@@ -360,6 +368,102 @@ class RegularDuesServiceTests : BehaviorSpec({
                 order.verify(settlementRepository).clearRegularDuesId(7L)
                 order.verify(regularDuesRepository).delete(entity)
                 response.regularDuesId shouldBe 7L
+            }
+        }
+    }
+
+    Given("구성원 ID와 사용자 ID가 다른 관리자가 정기 회비를 등록할 때") {
+        `when`(memberService.validateAdmin(1L, 10L)).thenReturn(Member(id = 3L, meetingId = 1L, userId = 10L, role = MemberRole.ADMIN))
+        `when`(regularDuesRepository.save(any(RegularDues::class.java))).thenReturn(regularDues())
+
+        When("createRegularDues 메서드를 호출하면") {
+            regularDuesService.createRegularDues(1L, 10L, createRequest())
+
+            Then("사용자 ID가 아닌 관리자의 구성원 ID를 등록자(자동 청구 공지 작성자)로 저장한다") {
+                val captor = ArgumentCaptor.forClass(RegularDues::class.java)
+                verify(regularDuesRepository).save(captor.capture())
+                captor.value.createdBy shouldBe 3L
+            }
+        }
+    }
+
+    Given("모임 관리자(ADMIN)가 아닌 사용자가 정기 회비 등록·수정·삭제를 요청할 때") {
+        val memberUserId = 2L
+        `when`(memberService.validateAdmin(1L, memberUserId))
+            .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 관리자만 요청할 수 있습니다."))
+
+        listOf<Pair<String, () -> Any>>(
+            "createRegularDues" to { regularDuesService.createRegularDues(1L, memberUserId, createRequest()) },
+            "updateRegularDues" to {
+                regularDuesService.updateRegularDues(1L, memberUserId, 7L, RegularDuesUpdateRequest(title = Optional.of("새 회비")))
+            },
+            "deleteRegularDues" to { regularDuesService.deleteRegularDues(1L, memberUserId, 7L) }
+        ).forEach { (method, call) ->
+            When("$method 메서드를 호출하면") {
+                val exception = shouldThrow<ApiException> { call() }
+
+                Then("FORBIDDEN 예외가 발생하고 정기 회비를 조회·저장·삭제하지 않는다") {
+                    exception.errorCode shouldBe ErrorCode.FORBIDDEN
+                    verify(memberService).validateAdmin(1L, memberUserId)
+                    verifyNoInteractions(regularDuesRepository, settlementRepository)
+                }
+            }
+        }
+    }
+
+    Given("모임 구성원이 아닌 사용자가 정기 회비 목록을 요청할 때") {
+        val outsiderUserId = 3L
+        `when`(memberService.validateMember(1L, outsiderUserId))
+            .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 구성원만 요청할 수 있습니다."))
+
+        When("getRegularDuesList 메서드를 호출하면") {
+            val exception = shouldThrow<ApiException> { regularDuesService.getRegularDuesList(1L, outsiderUserId) }
+
+            Then("FORBIDDEN 예외가 발생하고 정기 회비를 조회하지 않는다") {
+                exception.errorCode shouldBe ErrorCode.FORBIDDEN
+                verifyNoInteractions(regularDuesRepository)
+            }
+        }
+    }
+
+    Given("권한이 없는 사용자가 요청만으로 잘못된 정기 회비 요청을 보낼 때") {
+        val outsiderUserId = 4L
+        `when`(memberService.validateAdmin(1L, outsiderUserId))
+            .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 관리자만 요청할 수 있습니다."))
+
+        listOf<Pair<String, () -> Any>>(
+            "반복 주기에 맞지 않는 지정일로 등록하면" to {
+                regularDuesService.createRegularDues(1L, outsiderUserId, createRequest("WEEKLY", "10"))
+            },
+            "필수 항목을 null로 수정하면" to {
+                regularDuesService.updateRegularDues(1L, outsiderUserId, 7L, RegularDuesUpdateRequest(title = Optional.empty()))
+            },
+            "반복 주기만 보내 수정하면" to {
+                regularDuesService.updateRegularDues(1L, outsiderUserId, 7L, RegularDuesUpdateRequest(cycleType = Optional.of("WEEKLY")))
+            }
+        ).forEach { (case, call) ->
+            When(case) {
+                val exception = shouldThrow<ApiException> { call() }
+
+                Then("명세 오류 순서대로 권한(403)보다 요청 오류(400 VALIDATION_ERROR)가 먼저다") {
+                    exception.errorCode shouldBe ErrorCode.VALIDATION_ERROR
+                    verify(memberService, never()).validateAdmin(1L, outsiderUserId)
+                }
+            }
+        }
+    }
+
+    Given("없거나 종료된 모임의 정기 회비를 요청할 때") {
+        val endedMeetingId = 404L
+        `when`(memberService.validateAdmin(endedMeetingId, 1L))
+            .thenThrow(ApiException(ErrorCode.NOT_FOUND, "모임을 찾을 수 없습니다."))
+
+        When("deleteRegularDues 메서드를 호출하면") {
+            val exception = shouldThrow<ApiException> { regularDuesService.deleteRegularDues(endedMeetingId, 1L, 7L) }
+
+            Then("NOT_FOUND 예외가 발생하고 정기 회비를 조회하지 않는다") {
+                exception.errorCode shouldBe ErrorCode.NOT_FOUND
+                verifyNoInteractions(regularDuesRepository, settlementRepository)
             }
         }
     }

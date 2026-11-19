@@ -3,6 +3,7 @@ package com.teamani.moamoa.settlement.service
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.settlement.dto.RegularDuesCreateRequest
 import com.teamani.moamoa.settlement.dto.RegularDuesCreateResponse
 import com.teamani.moamoa.settlement.dto.RegularDuesDeleteResponse
@@ -23,18 +24,19 @@ import java.util.Optional
 class RegularDuesService(
     private val regularDuesRepository: RegularDuesRepository,
     private val settlementRepository: SettlementRepository,
-    private val memberRepository: MemberRepository
+    private val memberRepository: MemberRepository,
+    private val memberService: MemberService
 ) {
 
     @Transactional
-    fun createRegularDues(meetingId: Long, memberId: Long, request: RegularDuesCreateRequest): RegularDuesCreateResponse {
-        // 모임 존재 여부 및 ADMIN 권한 검증 (Member 도메인 연동 후속 이슈 #50 처리 예정)
-        validateMeeting(meetingId)
-        validateAdmin(meetingId, memberId)
-
+    fun createRegularDues(meetingId: Long, userId: Long, request: RegularDuesCreateRequest): RegularDuesCreateResponse {
+        // 요청만으로 판단할 수 있는 오류(400)를 권한 검증보다 먼저 확인 (명세 공통 오류 순서)
         val cycleType = CycleType.valueOf(requireNotNull(request.cycleType) { "반복 주기는 필수입니다." })
         val cycleDay = requireNotNull(request.cycleDay) { "반복 지정일은 필수입니다." }
         validateCycleDay(cycleType, cycleDay)
+
+        // 모임 없음·종료 404 → 구성원 아님·ADMIN 아님 403, 등록자(자동 청구 공지 작성자)는 요청한 관리자의 구성원 ID
+        val memberId = checkNotNull(memberService.validateAdmin(meetingId, userId).id) { "구성원 식별자가 없습니다." }
         val amount = requireNotNull(request.amount) { "회비 금액은 필수입니다." }
         validateTotalAmount(meetingId, amount)
 
@@ -63,9 +65,9 @@ class RegularDuesService(
     }
 
     @Transactional(readOnly = true)
-    fun getRegularDuesList(meetingId: Long, memberId: Long): RegularDuesListResponse {
-        validateMeeting(meetingId)
-        validateMember(meetingId, memberId)
+    fun getRegularDuesList(meetingId: Long, userId: Long): RegularDuesListResponse {
+        // 모임 없음·종료 404 → 구성원 아님 403
+        memberService.validateMember(meetingId, userId)
 
         return RegularDuesListResponse(
             regularDues = regularDuesRepository.findAllByMeetingIdOrderByIdAsc(meetingId).map { toResponse(it) }
@@ -75,58 +77,68 @@ class RegularDuesService(
     @Transactional
     fun updateRegularDues(
         meetingId: Long,
-        memberId: Long,
+        userId: Long,
         regularDuesId: Long,
         request: RegularDuesUpdateRequest
     ): RegularDuesResponse {
-        validateMeeting(meetingId)
-        validateAdmin(meetingId, memberId)
+        // 요청만으로 판단할 수 있는 오류(400)를 권한 검증보다 먼저 확인 (명세 공통 오류 순서)
+        // 모든 항목이 필수라 null로 보내면 비우지 않고 400
+        val title = request.title.valueOrKeep("회비명")
+        val cycleType = request.cycleType.valueOrKeep("반복 주기")?.let { CycleType.valueOf(it) }
+        val cycleDay = request.cycleDay.valueOrKeep("반복 지정일")
+        val amount = request.amount.valueOrKeep("회비 금액")
+        val sendTime = request.sendTime.valueOrKeep("발송 시간")?.let { LocalTime.parse(it, SEND_TIME_INPUT_FORMAT) }
+        val dueDays = request.dueDays.valueOrKeep("납부 기한 일수")
+        val bankName = request.bankName.valueOrKeep("은행명")
+        val accountNumber = request.accountNumber.valueOrKeep("계좌번호")
+        val accountHolder = request.accountHolder.valueOrKeep("예금주")
+        val postNotice = request.postNotice.valueOrKeep("공지 자동 발행 여부")
+        val isActive = request.isActive.valueOrKeep("활성화 여부")
+        if (cycleType != null && cycleDay == null) {
+            throw ApiException(ErrorCode.VALIDATION_ERROR, "반복 주기를 바꿀 때는 반복 지정일도 함께 보내야 합니다.")
+        }
+
+        // 모임 없음·종료 404 → 구성원 아님·ADMIN 아님 403
+        memberService.validateAdmin(meetingId, userId)
 
         // 자동 청구와 같은 정기 회비 잠금으로 조회해, 청구 중이면 끝난 뒤 수정 (청구는 바뀐 설정으로 다시 확인)
         val regularDues = regularDuesRepository.findByIdAndMeetingIdForUpdate(regularDuesId, meetingId)
             ?: throw ApiException(ErrorCode.NOT_FOUND, "정기 회비를 찾을 수 없습니다.")
 
-        // 모든 항목이 필수라 null로 보내면 비우지 않고 400
-        val cycleType = request.cycleType.valueOrKeep("반복 주기")?.let { CycleType.valueOf(it) }
-        val cycleDay = request.cycleDay.valueOrKeep("반복 지정일")
         // 매주·매월은 회차 기준일(그 주 월요일·그 달 1일)이 같은 날로 겹칠 수 있어, 바꾸면 회차가 빠질 수 있음 → 삭제 후 새로 등록
         if (cycleType != null && cycleType != regularDues.cycleType) {
             throw ApiException(ErrorCode.VALIDATION_ERROR, "반복 주기는 바꿀 수 없습니다. 삭제 후 새로 등록해 주세요.")
-        }
-        if (cycleType != null && cycleDay == null) {
-            throw ApiException(ErrorCode.VALIDATION_ERROR, "반복 주기를 바꿀 때는 반복 지정일도 함께 보내야 합니다.")
         }
         // 지정일만 보내면 기존 반복 주기 기준으로 검증
         if (cycleDay != null) {
             validateCycleDay(cycleType ?: regularDues.cycleType, cycleDay)
         }
-        val amount = request.amount.valueOrKeep("회비 금액")
         if (amount != null) {
             validateTotalAmount(meetingId, amount)
         }
 
         // 변경 감지(Dirty Checking)로 트랜잭션 종료 시 반영, 이미 생성된 회차 정산은 바뀌지 않음
         regularDues.update(
-            title = request.title.valueOrKeep("회비명"),
+            title = title,
             amount = amount,
             cycleType = cycleType,
             cycleDay = cycleDay,
-            sendTime = request.sendTime.valueOrKeep("발송 시간")?.let { LocalTime.parse(it, SEND_TIME_INPUT_FORMAT) },
-            dueDays = request.dueDays.valueOrKeep("납부 기한 일수"),
-            bankName = request.bankName.valueOrKeep("은행명"),
-            accountNumber = request.accountNumber.valueOrKeep("계좌번호"),
-            accountHolder = request.accountHolder.valueOrKeep("예금주"),
-            postNotice = request.postNotice.valueOrKeep("공지 자동 발행 여부"),
-            isActive = request.isActive.valueOrKeep("활성화 여부")
+            sendTime = sendTime,
+            dueDays = dueDays,
+            bankName = bankName,
+            accountNumber = accountNumber,
+            accountHolder = accountHolder,
+            postNotice = postNotice,
+            isActive = isActive
         )
 
         return toResponse(regularDues)
     }
 
     @Transactional
-    fun deleteRegularDues(meetingId: Long, memberId: Long, regularDuesId: Long): RegularDuesDeleteResponse {
-        validateMeeting(meetingId)
-        validateAdmin(meetingId, memberId)
+    fun deleteRegularDues(meetingId: Long, userId: Long, regularDuesId: Long): RegularDuesDeleteResponse {
+        // 모임 없음·종료 404 → 구성원 아님·ADMIN 아님 403
+        memberService.validateAdmin(meetingId, userId)
 
         // 연결 해제 전에 자동 청구와 같은 잠금을 잡아, 청구 중에 만들어진 회차 정산까지 연결을 해제
         val regularDues = regularDuesRepository.findByIdAndMeetingIdForUpdate(regularDuesId, meetingId)
@@ -175,21 +187,6 @@ class RegularDuesService(
         if (amount.toLong() * memberRepository.countByMeetingId(meetingId) > Int.MAX_VALUE) {
             throw ApiException(ErrorCode.VALIDATION_ERROR, "1인당 금액 × 구성원 수가 정산 총액 최대값(2,147,483,647원)을 넘습니다.")
         }
-    }
-
-    // 모임 존재 여부 검증 함수 (추후 Meeting 도메인 연동 자리, #50)
-    private fun validateMeeting(meetingId: Long) {
-        // TODO: 모임이 없거나 삭제되었으면 404 NOT_FOUND
-    }
-
-    // 관리자 권한 검증 함수 (추후 Member 도메인 연동 자리, #50)
-    private fun validateAdmin(meetingId: Long, memberId: Long) {
-        // TODO: 모임의 ADMIN이 아니면 403 FORBIDDEN
-    }
-
-    // 모임 구성원 권한 검증 함수 (추후 Member 도메인 연동 자리, #50)
-    private fun validateMember(meetingId: Long, memberId: Long) {
-        // TODO: 모임 구성원이 아니면 403 FORBIDDEN
     }
 
     companion object {

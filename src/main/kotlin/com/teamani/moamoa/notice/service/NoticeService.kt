@@ -72,6 +72,24 @@ class NoticeService(
         )
     }
 
+    // 정산 취소가 공지 삭제와 같은 순서(공지 → 정산)로 잠그도록 공지를 먼저 잠금 (반대 순서면 동시 요청 시 교착)
+    @Transactional
+    fun lockNotice(meetingId: Long, noticeId: Long) {
+        noticeRepository.findByIdAndMeetingIdForUpdate(noticeId, meetingId)
+    }
+
+    // 정산 취소 시 기존 안내 공지 표시: 제목 앞에 [취소](최대 50자), 본문 맨 앞에 취소 안내와 구분선 (명세 4-12)
+    @Transactional
+    fun markCanceled(meetingId: Long, noticeId: Long, cancelMessage: String) {
+        val notice = noticeRepository.findById(noticeId)
+            .filter { it.meetingId == meetingId }
+            .orElseThrow { ApiException(ErrorCode.NOT_FOUND, "공지사항을 찾을 수 없습니다.") }
+        notice.update(
+            title = "[취소] ${notice.title}".take(TITLE_MAX_LENGTH),
+            content = "$cancelMessage\n──── 기존 내용 ────\n${notice.content}"
+        )
+    }
+
     @Transactional
     fun deleteNotice(meetingId: Long, noticeId: Long, userId: Long): NoticeDeleteResponse {
         // 모임 없음·종료 404 → 구성원 아님·ADMIN 아님 403
@@ -162,9 +180,9 @@ class NoticeService(
         memberService.validateAdmin(meetingId, userId)
 
         // 공지가 없거나 다른 모임의 공지면 404
-        val notice = noticeRepository.findById(noticeId)
-            .filter { it.meetingId == meetingId }
-            .orElseThrow { ApiException(ErrorCode.NOT_FOUND, "공지사항을 찾을 수 없습니다.") }
+        // 잠금 조회로 정산 취소의 [취소] 표시 등 먼저 끝난 변경을 읽은 뒤 수정 (안 바꾼 항목이 이전 값으로 덮어써지지 않게 함)
+        val notice = noticeRepository.findByIdAndMeetingIdForUpdate(noticeId, meetingId)
+            ?: throw ApiException(ErrorCode.NOT_FOUND, "공지사항을 찾을 수 없습니다.")
 
         // 변경 감지(Dirty Checking)로 트랜잭션 종료 시 반영
         notice.update(request.title?.getOrNull(), request.content?.getOrNull())
@@ -250,5 +268,7 @@ class NoticeService(
 
         // 명세 3-2·3-3: 작성자가 모임을 나갔거나 탈퇴했을 때 표시 이름
         private const val WITHDRAWN_USER_NAME = "탈퇴한 사용자"
+
+        private const val TITLE_MAX_LENGTH = 50
     }
 }
