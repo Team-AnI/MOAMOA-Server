@@ -2,10 +2,13 @@ package com.teamani.moamoa.user.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.user.dto.UserSignUpRequest
 import com.teamani.moamoa.user.entity.AppUser
 import com.teamani.moamoa.user.entity.ProfileColor
 import com.teamani.moamoa.user.repository.AppUserRepository
+import com.teamani.moamoa.user.repository.PasswordResetTokenRepository
+import com.teamani.moamoa.user.repository.RefreshTokenRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.shouldBe
@@ -28,7 +31,12 @@ class UserServiceTests : BehaviorSpec({
     val appUserRepository: AppUserRepository = mock(AppUserRepository::class.java)
     val tokenService: TokenService = mock(TokenService::class.java)
     val passwordEncoder = BCryptPasswordEncoder(4)
-    val userService = UserService(appUserRepository, passwordEncoder, tokenService)
+    val memberService: MemberService = mock(MemberService::class.java)
+    val refreshTokenRepository: RefreshTokenRepository = mock(RefreshTokenRepository::class.java)
+    val passwordResetTokenRepository: PasswordResetTokenRepository = mock(PasswordResetTokenRepository::class.java)
+    val userService = UserService(
+        appUserRepository, passwordEncoder, tokenService, memberService, refreshTokenRepository, passwordResetTokenRepository
+    )
 
     afterEach { clearInvocations(appUserRepository, tokenService) }
 

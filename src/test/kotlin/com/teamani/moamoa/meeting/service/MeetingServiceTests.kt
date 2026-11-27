@@ -15,6 +15,8 @@ import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.notice.repository.NoticeReadRepository
 import com.teamani.moamoa.schedule.repository.ScheduleResponseRepository
+import com.teamani.moamoa.settlement.repository.SettlementMemberRepository
+import com.teamani.moamoa.user.entity.AppUser
 import com.teamani.moamoa.user.repository.AppUserRepository
 import com.teamani.moamoa.vote.repository.VoteRepository
 import io.kotest.assertions.throwables.shouldThrow
@@ -28,6 +30,7 @@ import io.kotest.matchers.string.shouldMatch
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyCollection
+import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mockito.`when`
 import org.mockito.Mockito.mock
@@ -38,6 +41,7 @@ import org.mockito.Mockito.verify
 import org.hibernate.exception.ConstraintViolationException
 import org.springframework.dao.DataIntegrityViolationException
 import java.sql.SQLException
+import java.time.OffsetDateTime
 import java.util.Optional
 
 class MeetingServiceTests : BehaviorSpec({
@@ -51,9 +55,11 @@ class MeetingServiceTests : BehaviorSpec({
         mock(AttendanceRepository::class.java),
         mock(NoticeReadRepository::class.java),
         mock(AppUserRepository::class.java),
-        mock(ScheduleResponseRepository::class.java)
+        mock(ScheduleResponseRepository::class.java),
+        mock(SettlementMemberRepository::class.java)
     )
-    val meetingService = MeetingService(meetingRepository, memberRepository, memberService)
+    val appUserRepository: AppUserRepository = mock(AppUserRepository::class.java)
+    val meetingService = MeetingService(meetingRepository, memberRepository, memberService, appUserRepository)
 
     val meetingId = 1L
     val adminUserId = 10L
@@ -77,7 +83,11 @@ class MeetingServiceTests : BehaviorSpec({
     }
 
     beforeTest {
-        reset(meetingRepository, memberRepository)
+        reset(meetingRepository, memberRepository, appUserRepository)
+        // 모임 생성·가입은 사용 중인 계정만 가능 (탈퇴한 계정은 아래 테스트에서 따로 확인)
+        `when`(appUserRepository.findByIdForUpdate(anyLong())).thenReturn(
+            AppUser(name = "김모아", email = "moa@example.com", password = "encoded", termsAgreedAt = OffsetDateTime.now())
+        )
         meeting = Meeting(name = "모아모아", description = "모임 소개", inviteCode = "A1B2C3D4", id = meetingId)
         `when`(meetingRepository.existsByIdAndEndedAtIsNull(meetingId)).thenReturn(true)
         `when`(meetingRepository.findByIdAndEndedAtIsNull(meetingId)).thenReturn(meeting)

@@ -163,7 +163,7 @@ class RegularDuesBillingConcurrencyTests : BehaviorSpec() {
                     // 청구가 모임 잠금을 얻고 구성원을 조회하기 직전에 멈춤
                     val pause = Pause()
                     doAnswer(beforeReal(memberRepository, pause::hold)).`when`(memberRepository)
-                        .findAllByMeetingIdOrderByIdAsc(anyLong())
+                        .findAllByMeetingIdForUpdate(anyLong())
                     val executor = Executors.newFixedThreadPool(2)
 
                     try {

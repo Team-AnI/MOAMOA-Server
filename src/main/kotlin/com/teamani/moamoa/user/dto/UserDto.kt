@@ -74,3 +74,12 @@ data class MyInfoUpdateRequest(
         String
     >? = null
 )
+
+data class WithdrawalRequest(
+    @field:NotBlank(message = "비밀번호는 필수입니다.")
+    val password: String?
+)
+
+data class WithdrawalResponse(
+    val success: Boolean
+)

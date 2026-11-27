@@ -1,6 +1,7 @@
 package com.teamani.moamoa.member.repository
 
 import com.teamani.moamoa.member.entity.Member
+import com.teamani.moamoa.member.entity.MemberRole
 import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Lock
@@ -20,6 +21,19 @@ interface MemberRepository : JpaRepository<Member, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select m from Member m where m.meetingId = :meetingId and m.id in :ids order by m.id")
     fun findAllByMeetingIdAndIdInForUpdate(@Param("meetingId") meetingId: Long, @Param("ids") ids: Collection<Long>): List<Member>
+
+    // 회원 탈퇴: 내 구성원 행을 모두 잠가 모임 나가기와 같은 기준으로 처리 (id 순서로 잠가 요청끼리 교착되지 않게 함)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from Member m where m.userId = :userId order by m.id")
+    fun findAllByUserIdForUpdate(@Param("userId") userId: Long): List<Member>
+
+    // 정기 회비 청구 대상: 모임 나가기와 같은 구성원 잠금으로 조회해, 조회 직후 나간 구성원의 납부 항목이 생기지 않게 함
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from Member m where m.meetingId = :meetingId order by m.id")
+    fun findAllByMeetingIdForUpdate(@Param("meetingId") meetingId: Long): List<Member>
+
+    // 유일한 관리자 확인 (회원 탈퇴): 같은 모임에 다른 관리자가 있는지
+    fun existsByMeetingIdAndRoleAndIdNot(meetingId: Long, role: MemberRole, id: Long): Boolean
 
     fun existsByMeetingIdAndUserId(meetingId: Long, userId: Long): Boolean
 

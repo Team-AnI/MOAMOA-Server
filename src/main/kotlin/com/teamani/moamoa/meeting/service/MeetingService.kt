@@ -19,6 +19,7 @@ import com.teamani.moamoa.member.entity.Member
 import com.teamani.moamoa.member.entity.MemberRole
 import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.member.service.MemberService
+import com.teamani.moamoa.user.repository.AppUserRepository
 import org.hibernate.exception.ConstraintViolationException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
@@ -30,11 +31,13 @@ import kotlin.jvm.optionals.getOrNull
 class MeetingService(
     private val meetingRepository: MeetingRepository,
     private val memberRepository: MemberRepository,
-    private val memberService: MemberService
+    private val memberService: MemberService,
+    private val appUserRepository: AppUserRepository
 ) {
 
     @Transactional
     fun createMeeting(userId: Long, request: MeetingCreateRequest): MeetingCreateResponse {
+        lockActiveUser(userId)
         val meeting = try {
             meetingRepository.saveAndFlush(
                 Meeting(
@@ -95,6 +98,7 @@ class MeetingService(
 
     @Transactional
     fun joinMeeting(userId: Long, request: MeetingJoinRequest): MeetingJoinResponse {
+        lockActiveUser(userId)
         val inviteCode = requireNotNull(request.inviteCode) { "초대코드는 필수입니다." }
         val meeting = meetingRepository.findByInviteCodeAndEndedAtIsNull(inviteCode)
             ?: throw ApiException(ErrorCode.NOT_FOUND, "초대코드에 해당하는 모임을 찾을 수 없습니다.")
@@ -166,6 +170,15 @@ class MeetingService(
         val meeting = findActiveMeeting(meetingId)
 
         return MeetingInviteCodeResponse(inviteCode = meeting.inviteCode)
+    }
+
+    // 모임 생성·가입은 구성원 확인이 없어 탈퇴 전에 받은 액세스 토큰으로도 요청할 수 있으므로 탈퇴한 사용자는 401
+    // 회원 탈퇴와 같은 사용자 잠금으로 확인해, 탈퇴가 먼저면 401, 생성·가입이 먼저면 탈퇴가 새 구성원까지 정리 (잠금 순서: 사용자 → 구성원)
+    private fun lockActiveUser(userId: Long) {
+        val user = appUserRepository.findByIdForUpdate(userId)
+        if (user == null || user.deletedAt != null) {
+            throw ApiException(ErrorCode.UNAUTHORIZED)
+        }
     }
 
     private fun findActiveMeeting(meetingId: Long): Meeting =

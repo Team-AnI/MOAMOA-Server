@@ -79,7 +79,8 @@ class RegularDuesBillingService(
         }
 
         // 청구 시점의 모임 구성원 전체 (신규 가입자는 가입 후 처음 도래하는 회차부터 포함)
-        val memberIds = memberRepository.findAllByMeetingIdOrderByIdAsc(regularDues.meetingId).mapNotNull { it.id }
+        // 모임 나가기와 같은 구성원 잠금으로 조회해, 조회 직후 나간 구성원의 납부 항목이 생기지 않게 함 (잠금 순서: 정기 회비 → 모임 → 구성원)
+        val memberIds = memberRepository.findAllByMeetingIdForUpdate(regularDues.meetingId).mapNotNull { it.id }
         if (memberIds.isEmpty()) {
             return null
         }
@@ -109,7 +110,8 @@ class RegularDuesBillingService(
             return false
         }
 
-        val memberIds = memberRepository.findAllByMeetingIdOrderByIdAsc(regularDues.meetingId).mapNotNull { it.id }
+        // 자동 청구와 같이 구성원 잠금으로 조회 (모임 나가기와 순서대로 처리)
+        val memberIds = memberRepository.findAllByMeetingIdForUpdate(regularDues.meetingId).mapNotNull { it.id }
         // 원래 기한(청구일 + dueDays일 23:59)이 이미 지났으면 오늘부터 dueDays일 (다음 청구일을 넘어도 상한 없음)
         val originalDueAt = dueAt(billingDate, regularDues.dueDays)
         val dueAt = if (originalDueAt.isBefore(nowKst)) dueAt(nowKst.toLocalDate(), regularDues.dueDays) else originalDueAt

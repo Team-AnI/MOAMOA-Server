@@ -4,6 +4,7 @@ import com.teamani.moamoa.user.entity.AppUser
 import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Lock
+import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import java.time.OffsetDateTime
 
@@ -25,4 +26,9 @@ interface AppUserRepository : JpaRepository<AppUser, Long> {
 
     // 기준 시각 이후에 탈퇴한 같은 이메일 해시가 있는지 확인 (재가입 제한)
     fun existsByWithdrawnEmailHashAndDeletedAtAfter(withdrawnEmailHash: String, deletedAt: OffsetDateTime): Boolean
+
+    // 재가입 제한 기간(7일)이 지난 탈퇴 이메일 해시 삭제 (기준 시각 이전에 탈퇴한 계정)
+    @Modifying
+    @Query("update AppUser u set u.withdrawnEmailHash = null where u.withdrawnEmailHash is not null and u.deletedAt <= :before")
+    fun clearWithdrawnEmailHashes(before: OffsetDateTime): Int
 }

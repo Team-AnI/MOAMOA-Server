@@ -27,6 +27,7 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
+import org.mockito.ArgumentMatchers.anyCollection
 import org.mockito.ArgumentMatchers.anyList
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyString
@@ -39,6 +40,7 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
+import java.util.Optional
 import java.time.LocalDate
 import java.time.OffsetDateTime
 
@@ -71,6 +73,20 @@ class SettlementServiceTests : BehaviorSpec({
             Member(id = id, meetingId = if (id >= 9000L) 2L else 1L, userId = id + 100, role = MemberRole.MEMBER)
         }
     }.`when`(memberRepository).findAllById(any())
+    // 정산 생성의 대상 확인(잠금 조회)과 승인의 나간 구성원 확인도 같은 기준
+    doAnswer { invocation ->
+        val meetingId = invocation.getArgument<Long>(0)
+        invocation.getArgument<Collection<Long>>(1).filterNot { it in 8000L..8999L }.sorted()
+            .map { id -> Member(id = id, meetingId = if (id >= 9000L) 2L else 1L, userId = id + 100, role = MemberRole.MEMBER) }
+            .filter { it.meetingId == meetingId }
+    }.`when`(memberRepository).findAllByMeetingIdAndIdInForUpdate(anyLong(), anyCollection())
+    doAnswer { invocation ->
+        val id = invocation.getArgument<Long>(0)
+        Optional.ofNullable(
+            if (id in 8000L..8999L) null
+            else Member(id = id, meetingId = if (id >= 9000L) 2L else 1L, userId = id + 100, role = MemberRole.MEMBER)
+        )
+    }.`when`(memberRepository).findById(anyLong())
     doAnswer { invocation ->
         invocation.getArgument<Iterable<Long>>(0).map { id ->
             AppUser(

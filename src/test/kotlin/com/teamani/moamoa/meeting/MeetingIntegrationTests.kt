@@ -7,6 +7,8 @@ import com.teamani.moamoa.meeting.repository.MeetingRepository
 import com.teamani.moamoa.member.entity.Member
 import com.teamani.moamoa.member.entity.MemberRole
 import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.user.entity.AppUser
+import com.teamani.moamoa.user.repository.AppUserRepository
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import io.kotest.matchers.collections.shouldNotContain
@@ -52,10 +54,35 @@ class MeetingIntegrationTests : BehaviorSpec() {
     @MockitoSpyBean
     lateinit var memberRepository: MemberRepository
 
+    @Autowired
+    lateinit var appUserRepository: AppUserRepository
+
+    // 요청자 (MeetingController·MemberController는 액세스 토큰으로 식별, 모임 생성·가입은 사용 중인 계정만 가능)
+    private var userId = 0L
+    private var adminUserId = 0L
+    private var memberUserId = 0L
+
+    private fun saveUser(email: String): Long = checkNotNull(
+        appUserRepository.save(
+            AppUser(name = "김모아", email = email, password = "encoded", termsAgreedAt = OffsetDateTime.now())
+        ).id
+    )
+
     init {
+        // beforeTest는 Given·When에서도 실행되므로 Then마다 한 번씩 실행되는 beforeEach·afterEach 사용
+        beforeEach {
+            userId = saveUser("meeting-user@moamoa.test")
+            adminUserId = saveUser("meeting-admin@moamoa.test")
+            memberUserId = saveUser("meeting-member@moamoa.test")
+        }
+
         afterTest {
             memberRepository.deleteAll()
             meetingRepository.deleteAll()
+        }
+
+        afterEach {
+            appUserRepository.deleteAllById(listOf(userId, adminUserId, memberUserId))
         }
 
         Given("중복 확인을 통과한 직후 다른 요청이 같은 초대코드를 먼저 저장했을 때") {
@@ -71,7 +98,7 @@ class MeetingIntegrationTests : BehaviorSpec() {
                     }.`when`(meetingRepository).existsByInviteCode(anyString())
 
                     mockMvc.post("/v1/meetings") {
-                        header(HttpHeaders.AUTHORIZATION, "Bearer ${jwtTokenProvider.createAccessToken(USER_ID)}")
+                        header(HttpHeaders.AUTHORIZATION, "Bearer ${jwtTokenProvider.createAccessToken(userId)}")
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"name":"모아모아"}"""
                     }.andExpect {
@@ -89,12 +116,12 @@ class MeetingIntegrationTests : BehaviorSpec() {
             When("초대코드로 참여하면") {
                 Then("unique 제약 위반이 409 CONFLICT로 응답되고 구성원은 1명만 남는다") {
                     val meetingId = checkNotNull(meetingRepository.save(Meeting(name = "모아모아", inviteCode = "RACE0001")).id)
-                    memberRepository.save(Member(meetingId = meetingId, userId = USER_ID, role = MemberRole.MEMBER))
+                    memberRepository.save(Member(meetingId = meetingId, userId = userId, role = MemberRole.MEMBER))
                     // 동시 요청 상황 재현: 중복 확인은 통과시키고 실제 저장에서 unique 제약에 걸리게 함
                     doReturn(false).`when`(memberRepository).existsByMeetingIdAndUserId(anyLong(), anyLong())
 
                     mockMvc.post("/v1/me/meetings") {
-                        header(HttpHeaders.AUTHORIZATION, "Bearer ${jwtTokenProvider.createAccessToken(USER_ID)}")
+                        header(HttpHeaders.AUTHORIZATION, "Bearer ${jwtTokenProvider.createAccessToken(userId)}")
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"inviteCode":"RACE0001"}"""
                     }.andExpect {
@@ -111,10 +138,10 @@ class MeetingIntegrationTests : BehaviorSpec() {
             When("필수 항목 name에 null을 보내면") {
                 Then("400 VALIDATION_ERROR를 응답하고 모임명은 그대로다") {
                     val meetingId = checkNotNull(meetingRepository.save(Meeting(name = "모아모아", inviteCode = "EDIT0001")).id)
-                    memberRepository.save(Member(meetingId = meetingId, userId = USER_ID, role = MemberRole.ADMIN))
+                    memberRepository.save(Member(meetingId = meetingId, userId = userId, role = MemberRole.ADMIN))
 
                     mockMvc.patch("/v1/meetings/$meetingId") {
-                        header(HttpHeaders.AUTHORIZATION, "Bearer ${jwtTokenProvider.createAccessToken(USER_ID)}")
+                        header(HttpHeaders.AUTHORIZATION, "Bearer ${jwtTokenProvider.createAccessToken(userId)}")
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"name":null}"""
                     }.andExpect {
@@ -131,8 +158,8 @@ class MeetingIntegrationTests : BehaviorSpec() {
         Given("서로 다른 두 사용자가 액세스 토큰으로 요청할 때") {
             When("한 사용자가 모임을 만들고 다른 사용자가 초대코드로 참여하면") {
                 Then("각자의 토큰으로 요청자가 구분되어 역할과 구성원이 따로 저장된다") {
-                    val adminToken = "Bearer ${jwtTokenProvider.createAccessToken(ADMIN_USER_ID)}"
-                    val memberToken = "Bearer ${jwtTokenProvider.createAccessToken(MEMBER_USER_ID)}"
+                    val adminToken = "Bearer ${jwtTokenProvider.createAccessToken(adminUserId)}"
+                    val memberToken = "Bearer ${jwtTokenProvider.createAccessToken(memberUserId)}"
 
                     val createResult = mockMvc.post("/v1/meetings") {
                         header(HttpHeaders.AUTHORIZATION, adminToken)
@@ -170,8 +197,8 @@ class MeetingIntegrationTests : BehaviorSpec() {
                         jsonPath("$.data.members.length()") { value(2) }
                     }
 
-                    memberRepository.findByMeetingIdAndUserId(meetingId, ADMIN_USER_ID)?.role shouldBe MemberRole.ADMIN
-                    memberRepository.findByMeetingIdAndUserId(meetingId, MEMBER_USER_ID)?.role shouldBe MemberRole.MEMBER
+                    memberRepository.findByMeetingIdAndUserId(meetingId, adminUserId)?.role shouldBe MemberRole.ADMIN
+                    memberRepository.findByMeetingIdAndUserId(meetingId, memberUserId)?.role shouldBe MemberRole.MEMBER
                 }
             }
         }
@@ -192,12 +219,5 @@ class MeetingIntegrationTests : BehaviorSpec() {
                 }
             }
         }
-    }
-
-    companion object {
-        // 요청자 (MeetingController·MemberController는 액세스 토큰으로 식별)
-        private const val USER_ID = 1L
-        private const val ADMIN_USER_ID = 10L
-        private const val MEMBER_USER_ID = 20L
     }
 }

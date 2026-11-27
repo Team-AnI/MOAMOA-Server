@@ -228,7 +228,10 @@ class SettlementService(
         val settlement = lockSettlement(meetingId, settlementId)
         val payment = findPayment(settlementId, paymentId)
         requireNotCanceled(settlement)
-        requirePending(payment, "확인 대기 상태의 납부만 승인할 수 있습니다.")
+        // 모임을 나간 구성원은 납부 완료를 다시 제출할 수 없으므로, 미납도 관리자가 바로 승인 (앱 밖에서 받은 납부 기록)
+        if (!(payment.status == PaymentStatus.UNPAID && hasLeftMeeting(meetingId, payment.memberId))) {
+            requirePending(payment, "확인 대기 상태의 납부만 승인할 수 있습니다.")
+        }
 
         val confirmedAt = OffsetDateTime.now()
         payment.approve(confirmedAt)
@@ -356,6 +359,10 @@ class SettlementService(
         }
     }
 
+    // 구성원 행이 없거나 다른 모임 구성원이면 모임을 나간(탈퇴한) 구성원
+    private fun hasLeftMeeting(meetingId: Long, memberId: Long): Boolean =
+        memberRepository.findById(memberId).orElse(null)?.meetingId != meetingId
+
     // 승인·반려는 확인 대기(PENDING) 상태의 납부 항목만 가능
     private fun requirePending(payment: SettlementMember, conflictMessage: String) {
         if (payment.status != PaymentStatus.PENDING) {
@@ -398,8 +405,10 @@ class SettlementService(
     }
 
     // 정산 대상은 모두 해당 모임의 구성원이어야 함 (아니면 404, 명세 4-1)
+    // 모임 나가기와 같은 구성원 잠금으로 확인해, 확인 직후 나간 구성원의 납부 항목이 생기지 않게 함
+    // (나가기가 먼저면 여기서 404, 생성이 먼저면 나가기가 새 미납을 보고 422. 잠금 순서: 구성원 → 일정 → 정산)
     private fun validateTargetMembers(meetingId: Long, memberIds: List<Long>) {
-        val targetCount = memberRepository.findAllById(memberIds).count { it.meetingId == meetingId }
+        val targetCount = memberRepository.findAllByMeetingIdAndIdInForUpdate(meetingId, memberIds).size
         if (targetCount != memberIds.size) {
             throw ApiException(ErrorCode.NOT_FOUND, "정산 대상 구성원을 찾을 수 없습니다.")
         }

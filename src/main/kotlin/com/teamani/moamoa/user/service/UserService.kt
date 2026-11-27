@@ -2,25 +2,34 @@ package com.teamani.moamoa.user.service
 
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.user.dto.MyInfoResponse
 import com.teamani.moamoa.user.dto.MyInfoUpdateRequest
 import com.teamani.moamoa.user.dto.UserSignUpRequest
 import com.teamani.moamoa.user.dto.UserSignUpResponse
+import com.teamani.moamoa.user.dto.WithdrawalRequest
+import com.teamani.moamoa.user.dto.WithdrawalResponse
 import com.teamani.moamoa.user.entity.AppUser
 import com.teamani.moamoa.user.entity.ProfileColor
 import com.teamani.moamoa.user.repository.AppUserRepository
+import com.teamani.moamoa.user.repository.PasswordResetTokenRepository
+import com.teamani.moamoa.user.repository.RefreshTokenRepository
 import org.hibernate.exception.ConstraintViolationException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.OffsetDateTime
+import java.util.UUID
 
 @Service
 class UserService(
     private val appUserRepository: AppUserRepository,
     private val passwordEncoder: PasswordEncoder,
-    private val tokenService: TokenService
+    private val tokenService: TokenService,
+    private val memberService: MemberService,
+    private val refreshTokenRepository: RefreshTokenRepository,
+    private val passwordResetTokenRepository: PasswordResetTokenRepository
 ) {
 
     @Transactional
@@ -80,6 +89,38 @@ class UserService(
 
         return toMyInfoResponse(user)
     }
+
+    // 회원 탈퇴 (7-9): 잠금 순서는 토큰 발급·재발급과 같은 사용자 → (구성원) → 토큰
+    // 사용자를 잠그므로 동시에 들어온 로그인·재발급은 탈퇴가 끝난 뒤 탈퇴한 계정으로 보고 401
+    @Transactional
+    fun withdraw(userId: Long, request: WithdrawalRequest): WithdrawalResponse {
+        val user = activeUser(appUserRepository.findByIdForUpdate(userId))
+
+        // 비밀번호가 틀려도 401이 아니라 400 (401은 앱이 토큰을 재발급하는 신호, 명세 7-9)
+        if (!passwordEncoder.matches(requireNotNull(request.password) { "비밀번호는 필수입니다." }, user.password)) {
+            throw ApiException(ErrorCode.VALIDATION_ERROR, "비밀번호가 일치하지 않습니다.")
+        }
+
+        // 유일한 관리자로 있는 모임·미납 정산이 있으면 422, 없으면 참여한 모든 모임에서 나감
+        memberService.leaveAllMeetings(userId)
+
+        // 구성원 기록 삭제 쿼리가 영속성 컨텍스트를 비워 위에서 조회한 사용자는 변경이 저장되지 않으므로 다시 조회 (잠금은 유지 중)
+        val lockedUser = checkNotNull(appUserRepository.findByIdForUpdate(userId)) { "사용자를 찾을 수 없습니다." }
+        lockedUser.withdraw(
+            encodedRandomPassword = checkNotNull(passwordEncoder.encode(UUID.randomUUID().toString())) { "비밀번호 암호화에 실패했습니다." },
+            withdrawnEmailHash = sha256(lockedUser.email),
+            deletedAt = OffsetDateTime.now()
+        )
+        refreshTokenRepository.deleteAllByUserId(userId)
+        passwordResetTokenRepository.deleteAllByUserId(userId)
+
+        return WithdrawalResponse(success = true)
+    }
+
+    // 재가입 제한 기간이 지난 탈퇴 이메일 해시 삭제 (스케줄러가 하루 한 번 호출)
+    @Transactional
+    fun clearExpiredWithdrawnEmailHashes(now: OffsetDateTime): Int =
+        appUserRepository.clearWithdrawnEmailHashes(now.minusDays(REJOIN_RESTRICTION_DAYS))
 
     // 탈퇴한 사용자의 액세스 토큰은 만료 전까지 유효하므로, 없거나 탈퇴한 사용자는 인증되지 않은 요청(401)으로 처리
     private fun activeUser(user: AppUser?): AppUser {

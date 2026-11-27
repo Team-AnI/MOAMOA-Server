@@ -18,6 +18,7 @@ import com.teamani.moamoa.schedule.entity.Schedule
 import com.teamani.moamoa.schedule.entity.ScheduleStatus
 import com.teamani.moamoa.schedule.repository.ScheduleRepository
 import com.teamani.moamoa.schedule.repository.ScheduleResponseRepository
+import com.teamani.moamoa.settlement.repository.SettlementMemberRepository
 import com.teamani.moamoa.user.entity.AppUser
 import com.teamani.moamoa.user.entity.ProfileColor
 import com.teamani.moamoa.user.repository.AppUserRepository
@@ -59,7 +60,8 @@ class AttendanceServiceTests : BehaviorSpec({
         attendanceRepository,
         mock(NoticeReadRepository::class.java),
         appUserRepository,
-        mock(ScheduleResponseRepository::class.java)
+        mock(ScheduleResponseRepository::class.java),
+        mock(SettlementMemberRepository::class.java)
     )
     val attendanceService = AttendanceService(memberService, memberRepository, scheduleRepository, attendanceRepository, appUserRepository)
 
