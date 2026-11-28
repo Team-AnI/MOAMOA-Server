@@ -1,6 +1,7 @@
 package com.teamani.moamoa.attendance.dto
 
 import com.teamani.moamoa.attendance.entity.AttendanceStatus
+import com.teamani.moamoa.user.entity.ProfileColor
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotEmpty
 import jakarta.validation.constraints.NotNull
@@ -39,9 +40,9 @@ data class AttendanceListResponse(
     val attendances: List<AttendanceMemberResponse>
 )
 
-// nickname은 User 도메인 구현 전까지 null 반환
 data class AttendanceMemberResponse(
     val memberId: Long,
-    val nickname: String?,
+    val userName: String,
+    val profileColor: ProfileColor,
     val status: AttendanceViewStatus
 )

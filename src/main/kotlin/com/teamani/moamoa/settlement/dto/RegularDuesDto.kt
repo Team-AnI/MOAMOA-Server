@@ -1,6 +1,7 @@
 package com.teamani.moamoa.settlement.dto
 
 import com.teamani.moamoa.settlement.entity.CycleType
+import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Pattern
@@ -19,6 +20,7 @@ data class RegularDuesCreateRequest(
 
     @field:NotNull(message = "회비 금액은 필수입니다.")
     @field:Positive(message = "회비 금액은 0보다 커야 합니다.")
+    @field:Max(value = MAX_AMOUNT, message = MAX_AMOUNT_MESSAGE)
     val amount: Int?,
 
     @field:NotNull(message = "반복 주기는 필수입니다.")
@@ -48,13 +50,18 @@ data class RegularDuesCreateRequest(
     @field:Size(max = 20, message = "예금주는 20자 이하여야 합니다.")
     val accountHolder: String?,
 
-    val postNotice: Boolean? = null
+    val postNotice: Boolean? = null,
+
+    // 이번 회차 청구일·발송 시각이 이미 지났으면 등록과 함께 이번 회차 정산 생성 (보내지 않으면 false)
+    val billCurrentPeriod: Boolean? = null
 )
 
 data class RegularDuesCreateResponse(
     val regularDuesId: Long,
     val title: String,
-    val isActive: Boolean
+    val isActive: Boolean,
+    // 등록과 함께 이번 회차 정산을 만들었으면 true
+    val currentPeriodBilled: Boolean
 )
 
 data class RegularDuesListResponse(
@@ -85,6 +92,7 @@ data class RegularDuesUpdateRequest(
     val title: Optional<String>? = null,
 
     @field:Positive(message = "회비 금액은 0보다 커야 합니다.", payload = [Unwrapping.Unwrap::class])
+    @field:Max(value = MAX_AMOUNT, message = MAX_AMOUNT_MESSAGE, payload = [Unwrapping.Unwrap::class])
     val amount: Optional<Int>? = null,
 
     @field:Pattern(regexp = CYCLE_TYPE_PATTERN, message = CYCLE_TYPE_MESSAGE, payload = [Unwrapping.Unwrap::class])
@@ -118,6 +126,10 @@ data class RegularDuesUpdateRequest(
 data class RegularDuesDeleteResponse(
     val regularDuesId: Long
 )
+
+// 1인당 회비 상한 (0을 더 붙이는 등 잘못 입력한 금액이 청구되지 않도록 제한)
+private const val MAX_AMOUNT = 5_000_000L
+private const val MAX_AMOUNT_MESSAGE = "1인당 회비 금액은 5,000,000원 이하여야 합니다."
 
 private const val CYCLE_TYPE_PATTERN = "WEEKLY|MONTHLY"
 private const val CYCLE_TYPE_MESSAGE = "반복 주기는 WEEKLY 또는 MONTHLY여야 합니다."

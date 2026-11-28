@@ -9,13 +9,16 @@ import com.teamani.moamoa.attendance.dto.AttendanceUpdateResponse
 import com.teamani.moamoa.attendance.dto.AttendanceViewStatus
 import com.teamani.moamoa.attendance.entity.AttendanceStatus
 import com.teamani.moamoa.attendance.service.AttendanceService
+import com.teamani.moamoa.global.auth.JwtTokenProvider
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
+import com.teamani.moamoa.user.entity.ProfileColor
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
@@ -34,7 +37,15 @@ class AttendanceControllerTests : BehaviorSpec() {
     @MockitoBean
     lateinit var attendanceService: AttendanceService
 
+    @MockitoBean
+    lateinit var jwtTokenProvider: JwtTokenProvider
+
     init {
+        beforeTest {
+            `when`(jwtTokenProvider.getUserId(ACCESS_TOKEN)).thenReturn(USER_ID)
+            `when`(jwtTokenProvider.getUserId(MEMBER_TOKEN)).thenReturn(MEMBER_USER_ID)
+        }
+
         Given("출석 처리 요청(PATCH /v1/meetings/{meetingId}/schedules/{scheduleId}/attendances)이 주어졌을 때") {
             When("유효한 요청이면") {
                 Then("200과 공통 응답 형식으로 보낸 항목을 그대로 반환한다") {
@@ -53,6 +64,7 @@ class AttendanceControllerTests : BehaviorSpec() {
                     )
 
                     mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":200,"status":"LATE"},{"memberId":300,"status":"ABSENT"}]}"""
                     }.andExpect {
@@ -72,6 +84,7 @@ class AttendanceControllerTests : BehaviorSpec() {
             When("attendances가 없으면") {
                 Then("400 VALIDATION_ERROR와 attendances 필드 details를 응답한다") {
                     mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{}"""
                     }.andExpect {
@@ -83,6 +96,7 @@ class AttendanceControllerTests : BehaviorSpec() {
             When("attendances가 빈 배열이면") {
                 Then("400 VALIDATION_ERROR와 attendances 필드 details를 응답한다") {
                     mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[]}"""
                     }.andExpect {
@@ -94,6 +108,7 @@ class AttendanceControllerTests : BehaviorSpec() {
             When("attendances에 null 원소가 있으면") {
                 Then("JSON_PARSE_ERROR가 아닌 400 VALIDATION_ERROR와 원소 위치 details를 응답한다") {
                     mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":200,"status":"PRESENT"},null]}"""
                     }.andExpect {
@@ -105,6 +120,7 @@ class AttendanceControllerTests : BehaviorSpec() {
             When("memberId가 없으면") {
                 Then("400 VALIDATION_ERROR와 memberId 필드 details를 응답한다") {
                     mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"status":"PRESENT"}]}"""
                     }.andExpect {
@@ -116,6 +132,7 @@ class AttendanceControllerTests : BehaviorSpec() {
             When("status가 없으면") {
                 Then("400 VALIDATION_ERROR와 status 필드 details를 응답한다") {
                     mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":200}]}"""
                     }.andExpect {
@@ -127,6 +144,7 @@ class AttendanceControllerTests : BehaviorSpec() {
             When("status가 조회 응답 전용 값인 UNCHECKED이면") {
                 Then("JSON_PARSE_ERROR가 아닌 400 VALIDATION_ERROR와 status 필드 details를 응답한다") {
                     mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":200,"status":"UNCHECKED"}]}"""
                     }.andExpect {
@@ -140,6 +158,7 @@ class AttendanceControllerTests : BehaviorSpec() {
                 Then("400 VALIDATION_ERROR와 status 필드 details를 응답한다") {
                     listOf("present", "ATTEND", "").forEach { status ->
                         mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                            header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                             contentType = MediaType.APPLICATION_JSON
                             content = """{"attendances":[{"memberId":200,"status":"$status"}]}"""
                         }.andExpect {
@@ -158,6 +177,7 @@ class AttendanceControllerTests : BehaviorSpec() {
                     ).thenThrow(ApiException(ErrorCode.VALIDATION_ERROR, "같은 구성원을 중복으로 처리할 수 없습니다."))
 
                     mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":200,"status":"PRESENT"},{"memberId":200,"status":"LATE"}]}"""
                     }.andExpect {
@@ -166,12 +186,13 @@ class AttendanceControllerTests : BehaviorSpec() {
                     }
                 }
             }
-            When("ADMIN이 아니면") {
-                Then("403 FORBIDDEN을 응답한다") {
-                    `when`(attendanceService.updateAttendances(2L, USER_ID, 5L, updateRequest(200L to "PRESENT")))
+            When("ADMIN이 아닌 사용자의 토큰으로 요청하면") {
+                Then("토큰의 사용자 기준으로 권한을 확인해 403 FORBIDDEN을 응답한다") {
+                    `when`(attendanceService.updateAttendances(1L, MEMBER_USER_ID, 5L, updateRequest(200L to "PRESENT")))
                         .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 관리자만 요청할 수 있습니다."))
 
-                    mockMvc.patch("/v1/meetings/2/schedules/5/attendances") {
+                    mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, MEMBER_BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":200,"status":"PRESENT"}]}"""
                     }.andExpect {
@@ -185,6 +206,7 @@ class AttendanceControllerTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.NOT_FOUND, "일정을 찾을 수 없습니다."))
 
                     mockMvc.patch("/v1/meetings/1/schedules/6/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":200,"status":"PRESENT"}]}"""
                     }.andExpect {
@@ -198,6 +220,7 @@ class AttendanceControllerTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.NOT_FOUND, "모임 구성원을 찾을 수 없습니다."))
 
                     mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":900,"status":"PRESENT"}]}"""
                     }.andExpect {
@@ -214,6 +237,7 @@ class AttendanceControllerTests : BehaviorSpec() {
                         )
 
                     mockMvc.patch("/v1/meetings/1/schedules/7/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":200,"status":"PRESENT"}]}"""
                     }.andExpect {
@@ -227,6 +251,7 @@ class AttendanceControllerTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.CONFLICT, "출석 처리 중 충돌이 발생했습니다. 다시 시도해 주세요."))
 
                     mockMvc.patch("/v1/meetings/1/schedules/8/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":200,"status":"PRESENT"}]}"""
                     }.andExpect {
@@ -238,24 +263,27 @@ class AttendanceControllerTests : BehaviorSpec() {
 
         Given("출석 현황 조회 요청(GET /v1/meetings/{meetingId}/schedules/{scheduleId}/attendances)이 주어졌을 때") {
             When("모임 구성원이 요청하면") {
-                Then("200과 구성원 전체의 출석 상태를 반환하고, 기록이 없는 구성원은 UNCHECKED, nickname은 null로 응답한다") {
+                Then("200과 구성원 전체의 출석 상태를 반환하고, 기록이 없는 구성원은 UNCHECKED, 이름·프로필 색과 함께 응답한다") {
                     `when`(attendanceService.getAttendances(1L, USER_ID, 5L)).thenReturn(
                         AttendanceListResponse(
                             scheduleId = 5L,
                             attendances = listOf(
-                                AttendanceMemberResponse(100L, null, AttendanceViewStatus.PRESENT),
-                                AttendanceMemberResponse(200L, null, AttendanceViewStatus.LATE),
-                                AttendanceMemberResponse(300L, null, AttendanceViewStatus.UNCHECKED),
+                                AttendanceMemberResponse(100L, "김모아", ProfileColor.BLUE, AttendanceViewStatus.PRESENT),
+                                AttendanceMemberResponse(200L, "이모아", ProfileColor.GRAY, AttendanceViewStatus.LATE),
+                                AttendanceMemberResponse(300L, "박모아", ProfileColor.LIGHT_BLUE, AttendanceViewStatus.UNCHECKED),
                             )
                         )
                     )
 
-                    mockMvc.get("/v1/meetings/1/schedules/5/attendances").andExpect {
+                    mockMvc.get("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.success") { value(true) }
                         jsonPath("$.data.scheduleId") { value(5) }
                         jsonPath("$.data.attendances[0].memberId") { value(100) }
-                        jsonPath("$.data.attendances[0].nickname") { value(null as Any?) }
+                        jsonPath("$.data.attendances[0].userName") { value("김모아") }
+                        jsonPath("$.data.attendances[0].profileColor") { value("BLUE") }
                         jsonPath("$.data.attendances[0].status") { value("PRESENT") }
                         jsonPath("$.data.attendances[1].status") { value("LATE") }
                         jsonPath("$.data.attendances[2].memberId") { value(300) }
@@ -263,12 +291,14 @@ class AttendanceControllerTests : BehaviorSpec() {
                     }
                 }
             }
-            When("모임 구성원이 아니면") {
-                Then("403 FORBIDDEN을 응답한다") {
-                    `when`(attendanceService.getAttendances(2L, USER_ID, 5L))
+            When("모임 구성원이 아닌 사용자의 토큰으로 요청하면") {
+                Then("토큰의 사용자 기준으로 권한을 확인해 403 FORBIDDEN을 응답한다") {
+                    `when`(attendanceService.getAttendances(1L, MEMBER_USER_ID, 5L))
                         .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 구성원만 요청할 수 있습니다."))
 
-                    mockMvc.get("/v1/meetings/2/schedules/5/attendances").andExpect {
+                    mockMvc.get("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, MEMBER_BEARER_TOKEN)
+                    }.andExpect {
                         expectError(403, "FORBIDDEN")
                     }
                 }
@@ -278,8 +308,60 @@ class AttendanceControllerTests : BehaviorSpec() {
                     `when`(attendanceService.getAttendances(1L, USER_ID, 6L))
                         .thenThrow(ApiException(ErrorCode.NOT_FOUND, "일정을 찾을 수 없습니다."))
 
-                    mockMvc.get("/v1/meetings/1/schedules/6/attendances").andExpect {
+                    mockMvc.get("/v1/meetings/1/schedules/6/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         expectError(404, "NOT_FOUND")
+                    }
+                }
+            }
+        }
+        Given("액세스 토큰 없이 출석 API를 요청할 때") {
+            listOf(
+                "출석 처리" to {
+                    mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{"attendances":[{"memberId":200,"status":"PRESENT"}]}"""
+                    }
+                },
+                "출석 현황 조회" to { mockMvc.get("/v1/meetings/1/schedules/5/attendances") },
+            ).forEach { (api, request) ->
+                When("$api API를 호출하면") {
+                    Then("401 UNAUTHORIZED를 응답한다") {
+                        request().andExpect { expectError(401, "UNAUTHORIZED") }
+                    }
+                }
+            }
+            When("요청 값도 잘못되었으면") {
+                Then("요청 값 검증보다 토큰 확인이 먼저라 401 UNAUTHORIZED를 응답한다") {
+                    mockMvc.patch("/v1/meetings/1/schedules/5/attendances") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{}"""
+                    }.andExpect {
+                        expectError(401, "UNAUTHORIZED")
+                    }
+                }
+            }
+        }
+
+        Given("유효하지 않은 Authorization 헤더로 출석 API를 요청할 때") {
+            When("Bearer 형식이 아니면") {
+                Then("401 UNAUTHORIZED를 응답한다") {
+                    mockMvc.get("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, "Basic $ACCESS_TOKEN")
+                    }.andExpect {
+                        expectError(401, "UNAUTHORIZED")
+                    }
+                }
+            }
+            When("위조·만료된 토큰이면") {
+                Then("401 UNAUTHORIZED를 응답한다") {
+                    `when`(jwtTokenProvider.getUserId(INVALID_TOKEN)).thenThrow(ApiException(ErrorCode.UNAUTHORIZED))
+
+                    mockMvc.get("/v1/meetings/1/schedules/5/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, "Bearer $INVALID_TOKEN")
+                    }.andExpect {
+                        expectError(401, "UNAUTHORIZED")
                     }
                 }
             }
@@ -297,7 +379,13 @@ class AttendanceControllerTests : BehaviorSpec() {
     }
 
     companion object {
-        // 인증 구현 전 Controller의 임시 사용자 ID
+        // 토큰 검증은 mock으로 대체: ACCESS_TOKEN은 USER_ID, MEMBER_TOKEN은 MEMBER_USER_ID로 인증
         private const val USER_ID = 1L
+        private const val MEMBER_USER_ID = 2L
+        private const val ACCESS_TOKEN = "test-access-token"
+        private const val MEMBER_TOKEN = "member-access-token"
+        private const val BEARER_TOKEN = "Bearer $ACCESS_TOKEN"
+        private const val MEMBER_BEARER_TOKEN = "Bearer $MEMBER_TOKEN"
+        private const val INVALID_TOKEN = "invalid-token"
     }
 }

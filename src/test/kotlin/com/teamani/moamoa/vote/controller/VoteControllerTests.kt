@@ -1,8 +1,10 @@
 package com.teamani.moamoa.vote.controller
 
+import com.teamani.moamoa.global.auth.JwtTokenProvider
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.schedule.entity.ScheduleStatus
+import com.teamani.moamoa.user.entity.ProfileColor
 import com.teamani.moamoa.vote.dto.MyVoteSubmitRequest
 import com.teamani.moamoa.vote.dto.MyVoteSubmitResponse
 import com.teamani.moamoa.vote.dto.VoteCandidateResponse
@@ -19,6 +21,7 @@ import io.kotest.extensions.spring.SpringExtension
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
@@ -41,7 +44,15 @@ class VoteControllerTests : BehaviorSpec() {
     @MockitoBean
     lateinit var voteService: VoteService
 
+    @MockitoBean
+    lateinit var jwtTokenProvider: JwtTokenProvider
+
     init {
+        beforeTest {
+            `when`(jwtTokenProvider.getUserId(ACCESS_TOKEN)).thenReturn(USER_ID)
+            `when`(jwtTokenProvider.getUserId(MEMBER_TOKEN)).thenReturn(MEMBER_USER_ID)
+        }
+
         // 요청 일시는 역직렬화 시 UTC로 맞춰져도 equals가 유지되도록 Z 표기로 작성
         val deadline = OffsetDateTime.now(ZoneOffset.UTC).plusDays(7).truncatedTo(ChronoUnit.SECONDS)
         val firstTime = OffsetDateTime.parse("2026-11-01T10:00:00Z")
@@ -63,6 +74,7 @@ class VoteControllerTests : BehaviorSpec() {
                     )
 
                     mockMvc.post("/v1/meetings/1/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = createBody("\"11월 정기 모임\"", "\"$deadline\"", "[\"$secondTime\",\"$firstTime\"]")
                     }.andExpect {
@@ -80,6 +92,7 @@ class VoteControllerTests : BehaviorSpec() {
             When("title이 없으면") {
                 Then("400 VALIDATION_ERROR와 title 필드 details를 응답한다") {
                     mockMvc.post("/v1/meetings/1/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"voteDeadlineAt":"$deadline","meetingTimes":["$firstTime"]}"""
                     }.andExpect {
@@ -91,6 +104,7 @@ class VoteControllerTests : BehaviorSpec() {
             When("title이 공백이면") {
                 Then("400 VALIDATION_ERROR와 title 필드 details를 응답한다") {
                     mockMvc.post("/v1/meetings/1/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = createBody("\"   \"", "\"$deadline\"", "[\"$firstTime\"]")
                     }.andExpect {
@@ -102,6 +116,7 @@ class VoteControllerTests : BehaviorSpec() {
             When("title이 50자를 넘으면") {
                 Then("400 VALIDATION_ERROR와 title 필드 details를 응답한다") {
                     mockMvc.post("/v1/meetings/1/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = createBody("\"${"가".repeat(51)}\"", "\"$deadline\"", "[\"$firstTime\"]")
                     }.andExpect {
@@ -113,6 +128,7 @@ class VoteControllerTests : BehaviorSpec() {
             When("voteDeadlineAt이 없으면") {
                 Then("400 VALIDATION_ERROR와 voteDeadlineAt 필드 details를 응답한다") {
                     mockMvc.post("/v1/meetings/1/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"title":"11월 정기 모임","meetingTimes":["$firstTime"]}"""
                     }.andExpect {
@@ -126,6 +142,7 @@ class VoteControllerTests : BehaviorSpec() {
                     val pastDeadline = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1).truncatedTo(ChronoUnit.SECONDS)
 
                     mockMvc.post("/v1/meetings/1/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = createBody("\"11월 정기 모임\"", "\"$pastDeadline\"", "[\"$firstTime\"]")
                     }.andExpect {
@@ -137,6 +154,7 @@ class VoteControllerTests : BehaviorSpec() {
             When("meetingTimes가 없으면") {
                 Then("400 VALIDATION_ERROR와 meetingTimes 필드 details를 응답한다") {
                     mockMvc.post("/v1/meetings/1/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"title":"11월 정기 모임","voteDeadlineAt":"$deadline"}"""
                     }.andExpect {
@@ -148,6 +166,7 @@ class VoteControllerTests : BehaviorSpec() {
             When("meetingTimes가 빈 배열이면") {
                 Then("400 VALIDATION_ERROR와 meetingTimes 필드 details를 응답한다") {
                     mockMvc.post("/v1/meetings/1/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = createBody("\"11월 정기 모임\"", "\"$deadline\"", "[]")
                     }.andExpect {
@@ -159,6 +178,7 @@ class VoteControllerTests : BehaviorSpec() {
             When("meetingTimes에 null이 있으면") {
                 Then("400 VALIDATION_ERROR와 해당 원소 필드 details를 응답한다") {
                     mockMvc.post("/v1/meetings/1/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = createBody("\"11월 정기 모임\"", "\"$deadline\"", "[\"$firstTime\",null]")
                     }.andExpect {
@@ -173,6 +193,7 @@ class VoteControllerTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.VALIDATION_ERROR, "후보 시간은 중복될 수 없습니다."))
 
                     mockMvc.post("/v1/meetings/2/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = createBody("\"11월 정기 모임\"", "\"$deadline\"", "[\"$firstTime\",\"$firstTime\"]")
                     }.andExpect {
@@ -181,12 +202,13 @@ class VoteControllerTests : BehaviorSpec() {
                     }
                 }
             }
-            When("ADMIN이 아니면") {
-                Then("403 FORBIDDEN을 응답한다") {
-                    `when`(voteService.createVote(3L, USER_ID, createRequest(deadline, listOf(firstTime))))
+            When("ADMIN이 아닌 사용자의 토큰으로 요청하면") {
+                Then("토큰의 사용자 기준으로 권한을 확인해 403 FORBIDDEN을 응답한다") {
+                    `when`(voteService.createVote(1L, MEMBER_USER_ID, createRequest(deadline, listOf(firstTime))))
                         .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 관리자만 요청할 수 있습니다."))
 
-                    mockMvc.post("/v1/meetings/3/schedule-votes") {
+                    mockMvc.post("/v1/meetings/1/schedule-votes") {
+                        header(HttpHeaders.AUTHORIZATION, MEMBER_BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = createBody("\"11월 정기 모임\"", "\"$deadline\"", "[\"$firstTime\"]")
                     }.andExpect {
@@ -216,7 +238,9 @@ class VoteControllerTests : BehaviorSpec() {
                         )
                     )
 
-                    mockMvc.get("/v1/meetings/1/schedules/5/candidates").andExpect {
+                    mockMvc.get("/v1/meetings/1/schedules/5/candidates") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.success") { value(true) }
                         jsonPath("$.data.scheduleId") { value(5) }
@@ -238,7 +262,9 @@ class VoteControllerTests : BehaviorSpec() {
                     `when`(voteService.getVote(1L, USER_ID, 6L))
                         .thenThrow(ApiException(ErrorCode.NOT_FOUND, "투표를 찾을 수 없습니다."))
 
-                    mockMvc.get("/v1/meetings/1/schedules/6/candidates").andExpect {
+                    mockMvc.get("/v1/meetings/1/schedules/6/candidates") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         expectError(404, "NOT_FOUND")
                     }
                 }
@@ -252,6 +278,7 @@ class VoteControllerTests : BehaviorSpec() {
                         .thenReturn(MyVoteSubmitResponse(5L, listOf(firstTimeKst), submittedAt))
 
                     mockMvc.put("/v1/meetings/1/schedules/5/votes/me") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"meetingTimes":["$firstTime"]}"""
                     }.andExpect {
@@ -268,6 +295,7 @@ class VoteControllerTests : BehaviorSpec() {
                         .thenReturn(MyVoteSubmitResponse(7L, emptyList(), submittedAt))
 
                     mockMvc.put("/v1/meetings/1/schedules/7/votes/me") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"meetingTimes":[]}"""
                     }.andExpect {
@@ -279,6 +307,7 @@ class VoteControllerTests : BehaviorSpec() {
             When("meetingTimes가 없으면") {
                 Then("400 VALIDATION_ERROR와 meetingTimes 필드 details를 응답한다") {
                     mockMvc.put("/v1/meetings/1/schedules/5/votes/me") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{}"""
                     }.andExpect {
@@ -290,6 +319,7 @@ class VoteControllerTests : BehaviorSpec() {
             When("meetingTimes에 null이 있으면") {
                 Then("400 VALIDATION_ERROR와 해당 원소 필드 details를 응답한다") {
                     mockMvc.put("/v1/meetings/1/schedules/5/votes/me") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"meetingTimes":[null]}"""
                     }.andExpect {
@@ -304,6 +334,7 @@ class VoteControllerTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.UNPROCESSABLE_ENTITY, "투표가 마감되었습니다."))
 
                     mockMvc.put("/v1/meetings/1/schedules/8/votes/me") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"meetingTimes":["$firstTime"]}"""
                     }.andExpect {
@@ -318,6 +349,7 @@ class VoteControllerTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.CONFLICT, "투표 제출 중 충돌이 발생했습니다. 다시 시도해 주세요."))
 
                     mockMvc.put("/v1/meetings/1/schedules/9/votes/me") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"meetingTimes":["$firstTime"]}"""
                     }.andExpect {
@@ -330,24 +362,27 @@ class VoteControllerTests : BehaviorSpec() {
 
         Given("투표 참여 현황 조회 요청(GET /v1/meetings/{meetingId}/schedules/{scheduleId}/vote-responses)이 주어졌을 때") {
             When("ADMIN이 요청하면") {
-                Then("200과 구성원별 응답 여부를 반환하고 nickname과 미응답자의 submittedAt은 null로 응답한다") {
+                Then("200과 구성원별 이름·프로필 색·응답 여부를 반환하고 미응답자의 submittedAt은 null로 응답한다") {
                     `when`(voteService.getVoteParticipation(1L, USER_ID, 5L)).thenReturn(
                         VoteParticipationResponse(
                             memberCount = 2L,
                             respondedCount = 1L,
                             members = listOf(
-                                VoteMemberResponse(100L, null, false, null),
-                                VoteMemberResponse(200L, null, true, submittedAt),
+                                VoteMemberResponse(100L, "김모아", ProfileColor.BLUE, false, null),
+                                VoteMemberResponse(200L, "이모아", ProfileColor.GRAY, true, submittedAt),
                             )
                         )
                     )
 
-                    mockMvc.get("/v1/meetings/1/schedules/5/vote-responses").andExpect {
+                    mockMvc.get("/v1/meetings/1/schedules/5/vote-responses") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.memberCount") { value(2) }
                         jsonPath("$.data.respondedCount") { value(1) }
                         jsonPath("$.data.members[0].memberId") { value(100) }
-                        jsonPath("$.data.members[0].nickname") { value(null as Any?) }
+                        jsonPath("$.data.members[0].userName") { value("김모아") }
+                        jsonPath("$.data.members[0].profileColor") { value("BLUE") }
                         jsonPath("$.data.members[0].responded") { value(false) }
                         jsonPath("$.data.members[0].submittedAt") { value(null as Any?) }
                         jsonPath("$.data.members[1].responded") { value(true) }
@@ -355,12 +390,14 @@ class VoteControllerTests : BehaviorSpec() {
                     }
                 }
             }
-            When("ADMIN이 아니면") {
-                Then("403 FORBIDDEN을 응답한다") {
-                    `when`(voteService.getVoteParticipation(1L, USER_ID, 6L))
+            When("ADMIN이 아닌 사용자의 토큰으로 요청하면") {
+                Then("토큰의 사용자 기준으로 권한을 확인해 403 FORBIDDEN을 응답한다") {
+                    `when`(voteService.getVoteParticipation(1L, MEMBER_USER_ID, 6L))
                         .thenThrow(ApiException(ErrorCode.FORBIDDEN, "모임 관리자만 요청할 수 있습니다."))
 
-                    mockMvc.get("/v1/meetings/1/schedules/6/vote-responses").andExpect {
+                    mockMvc.get("/v1/meetings/1/schedules/6/vote-responses") {
+                        header(HttpHeaders.AUTHORIZATION, MEMBER_BEARER_TOKEN)
+                    }.andExpect {
                         expectError(403, "FORBIDDEN")
                     }
                 }
@@ -374,6 +411,7 @@ class VoteControllerTests : BehaviorSpec() {
                         .thenReturn(VoteConfirmResponse(5L, "11월 정기 모임", secondTimeKst, ScheduleStatus.CONFIRMED))
 
                     mockMvc.post("/v1/meetings/1/schedules/5/confirmation") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"meetingTime":"$secondTime"}"""
                     }.andExpect {
@@ -388,6 +426,7 @@ class VoteControllerTests : BehaviorSpec() {
             When("meetingTime이 없으면") {
                 Then("400 VALIDATION_ERROR와 meetingTime 필드 details를 응답한다") {
                     mockMvc.post("/v1/meetings/1/schedules/5/confirmation") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{}"""
                     }.andExpect {
@@ -402,10 +441,74 @@ class VoteControllerTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.UNPROCESSABLE_ENTITY, "진행 중인 투표만 확정할 수 있습니다."))
 
                     mockMvc.post("/v1/meetings/1/schedules/6/confirmation") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"meetingTime":"$secondTime"}"""
                     }.andExpect {
                         expectError(422, "UNPROCESSABLE_ENTITY")
+                    }
+                }
+            }
+        }
+        Given("액세스 토큰 없이 투표 API를 요청할 때") {
+            listOf(
+                "투표 생성" to {
+                    mockMvc.post("/v1/meetings/1/schedule-votes") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = createBody("\"11월 정기 모임\"", "\"$deadline\"", "[\"$firstTime\"]")
+                    }
+                },
+                "투표 현황 조회" to { mockMvc.get("/v1/meetings/1/schedules/5/candidates") },
+                "내 투표 제출" to {
+                    mockMvc.put("/v1/meetings/1/schedules/5/votes/me") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{"meetingTimes":["$firstTime"]}"""
+                    }
+                },
+                "투표 응답 조회" to { mockMvc.get("/v1/meetings/1/schedules/5/vote-responses") },
+                "일정 확정" to {
+                    mockMvc.post("/v1/meetings/1/schedules/5/confirmation") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{"meetingTime":"$secondTime"}"""
+                    }
+                },
+            ).forEach { (api, request) ->
+                When("$api API를 호출하면") {
+                    Then("401 UNAUTHORIZED를 응답한다") {
+                        request().andExpect { expectError(401, "UNAUTHORIZED") }
+                    }
+                }
+            }
+            When("요청 값도 잘못되었으면") {
+                Then("요청 값 검증보다 토큰 확인이 먼저라 401 UNAUTHORIZED를 응답한다") {
+                    mockMvc.put("/v1/meetings/1/schedules/5/votes/me") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{}"""
+                    }.andExpect {
+                        expectError(401, "UNAUTHORIZED")
+                    }
+                }
+            }
+        }
+
+        Given("유효하지 않은 Authorization 헤더로 투표 API를 요청할 때") {
+            When("Bearer 형식이 아니면") {
+                Then("401 UNAUTHORIZED를 응답한다") {
+                    mockMvc.get("/v1/meetings/1/schedules/5/candidates") {
+                        header(HttpHeaders.AUTHORIZATION, "Basic $ACCESS_TOKEN")
+                    }.andExpect {
+                        expectError(401, "UNAUTHORIZED")
+                    }
+                }
+            }
+            When("위조·만료된 토큰이면") {
+                Then("401 UNAUTHORIZED를 응답한다") {
+                    `when`(jwtTokenProvider.getUserId(INVALID_TOKEN)).thenThrow(ApiException(ErrorCode.UNAUTHORIZED))
+
+                    mockMvc.get("/v1/meetings/1/schedules/5/candidates") {
+                        header(HttpHeaders.AUTHORIZATION, "Bearer $INVALID_TOKEN")
+                    }.andExpect {
+                        expectError(401, "UNAUTHORIZED")
                     }
                 }
             }
@@ -427,7 +530,13 @@ class VoteControllerTests : BehaviorSpec() {
     }
 
     companion object {
-        // 인증 구현 전 Controller의 임시 사용자 ID
+        // 토큰 검증은 mock으로 대체: ACCESS_TOKEN은 USER_ID, MEMBER_TOKEN은 MEMBER_USER_ID로 인증
         private const val USER_ID = 1L
+        private const val MEMBER_USER_ID = 2L
+        private const val ACCESS_TOKEN = "test-access-token"
+        private const val MEMBER_TOKEN = "member-access-token"
+        private const val BEARER_TOKEN = "Bearer $ACCESS_TOKEN"
+        private const val MEMBER_BEARER_TOKEN = "Bearer $MEMBER_TOKEN"
+        private const val INVALID_TOKEN = "invalid-token"
     }
 }

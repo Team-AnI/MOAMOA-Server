@@ -7,3 +7,46 @@ spring:
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+  # 비밀번호 재설정 메일 발송 (운영 값은 production Environment variable·secret으로 관리)
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      # 재설정 링크가 암호화 없이 나가지 않도록 STARTTLS를 못 하면 보내지 않음
+      mail.smtp.starttls.required: true
+      # 응답 없는 메일 서버가 발송 스레드를 계속 붙잡지 않도록 연결·읽기·쓰기 제한 시간(ms)
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+
+management:
+  health:
+    # 메일 서버(SMTP) 연결은 헬스 체크에서 제외 (메일 장애가 서버 상태 DOWN·배포 실패로 이어지지 않게, 발송 실패는 로그로 확인)
+    mail:
+      enabled: false
+
+server:
+  # Nginx가 전달한 X-Forwarded-* 헤더(/api 접두어·https)를 요청 URL에 반영
+  forward-headers-strategy: framework
+
+moamoa:
+  cors:
+    # 쉼표로 구분, 값이 없으면 허용 Origin 없음 (운영 값은 production Environment variable로 관리)
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+  password-reset:
+    # 보내는 사람 주소 (Gmail은 계정 주소와 같게)
+    mail-from: ${MAIL_FROM:}
+    # 재설정 웹 페이지 주소, 메일 링크는 {web-url}/reset-password?token={토큰}
+    web-url: ${PASSWORD_RESET_WEB_URL:https://moamoa-sandbox.aandiclub.com}
+
+springdoc:
+  swagger-ui:
+    # Authorize 토큰을 브라우저에 유지할지 여부 (운영은 기본값 false, 로컬에서만 .env로 true)
+    persist-authorization: ${SWAGGER_PERSIST_AUTHORIZATION:false}
+
+jwt:
+  secret: ${JWT_SECRET}

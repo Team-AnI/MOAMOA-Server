@@ -1,5 +1,6 @@
 package com.teamani.moamoa.member.controller
 
+import com.teamani.moamoa.global.auth.CurrentUserId
 import com.teamani.moamoa.global.response.CommonResponse
 import com.teamani.moamoa.member.dto.MemberLeaveResponse
 import com.teamani.moamoa.member.dto.MemberListResponse
@@ -19,10 +20,9 @@ class MemberController(
 
     @GetMapping
     fun getMembers(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long
     ): ResponseEntity<CommonResponse<MemberListResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: MemberListResponse = memberService.getMembers(meetingId, currentUserId)
 
         return ResponseEntity.ok(CommonResponse(data = response))
@@ -30,10 +30,9 @@ class MemberController(
 
     @DeleteMapping("/me")
     fun leaveMeeting(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long
     ): ResponseEntity<CommonResponse<MemberLeaveResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: MemberLeaveResponse = memberService.leaveMeeting(meetingId, currentUserId)
 
         return ResponseEntity.ok(CommonResponse(data = response))

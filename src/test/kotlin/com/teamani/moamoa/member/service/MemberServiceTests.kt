@@ -7,11 +7,15 @@ import com.teamani.moamoa.meeting.repository.MeetingRepository
 import com.teamani.moamoa.member.entity.Member
 import com.teamani.moamoa.member.entity.MemberRole
 import com.teamani.moamoa.member.repository.MemberRepository
+import com.teamani.moamoa.notice.repository.NoticeReadRepository
+import com.teamani.moamoa.schedule.repository.ScheduleResponseRepository
+import com.teamani.moamoa.user.entity.AppUser
+import com.teamani.moamoa.user.entity.ProfileColor
+import com.teamani.moamoa.user.repository.AppUserRepository
 import com.teamani.moamoa.vote.repository.VoteRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldHaveSize
-import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyLong
@@ -21,6 +25,7 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.reset
 import org.mockito.Mockito.verify
+import java.time.OffsetDateTime
 
 class MemberServiceTests : BehaviorSpec({
 
@@ -28,7 +33,18 @@ class MemberServiceTests : BehaviorSpec({
     val memberRepository: MemberRepository = mock(MemberRepository::class.java)
     val voteRepository: VoteRepository = mock(VoteRepository::class.java)
     val attendanceRepository: AttendanceRepository = mock(AttendanceRepository::class.java)
-    val memberService = MemberService(meetingRepository, memberRepository, voteRepository, attendanceRepository)
+    val noticeReadRepository: NoticeReadRepository = mock(NoticeReadRepository::class.java)
+    val appUserRepository: AppUserRepository = mock(AppUserRepository::class.java)
+    val scheduleResponseRepository: ScheduleResponseRepository = mock(ScheduleResponseRepository::class.java)
+    val memberService = MemberService(
+        meetingRepository,
+        memberRepository,
+        voteRepository,
+        attendanceRepository,
+        noticeReadRepository,
+        appUserRepository,
+        scheduleResponseRepository
+    )
 
     val meetingId = 1L
     val adminUserId = 10L
@@ -38,10 +54,12 @@ class MemberServiceTests : BehaviorSpec({
     val member = Member(meetingId = meetingId, userId = memberUserId, role = MemberRole.MEMBER, id = 200L)
 
     beforeTest {
-        reset(meetingRepository, memberRepository, voteRepository, attendanceRepository)
+        reset(meetingRepository, memberRepository, voteRepository, attendanceRepository, noticeReadRepository)
         `when`(meetingRepository.existsByIdAndEndedAtIsNull(meetingId)).thenReturn(true)
         `when`(memberRepository.findByMeetingIdAndUserId(meetingId, adminUserId)).thenReturn(admin)
         `when`(memberRepository.findByMeetingIdAndUserId(meetingId, memberUserId)).thenReturn(member)
+        `when`(memberRepository.findByMeetingIdAndUserIdForUpdate(meetingId, adminUserId)).thenReturn(admin)
+        `when`(memberRepository.findByMeetingIdAndUserIdForUpdate(meetingId, memberUserId)).thenReturn(member)
     }
 
     Given("모임 구성원 권한을 검증할 때") {
@@ -85,15 +103,24 @@ class MemberServiceTests : BehaviorSpec({
 
     Given("구성원 목록을 조회할 때") {
         When("모임 구성원이 요청하면") {
-            Then("구성원 id·nickname(null)·role 목록을 반환한다") {
+            Then("구성원 id·실제 이름·프로필 색·role 목록을 반환한다") {
                 `when`(memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId)).thenReturn(listOf(admin, member))
+                `when`(appUserRepository.findAllById(listOf(adminUserId, memberUserId))).thenReturn(
+                    listOf(
+                        AppUser(id = adminUserId, name = "김모아", email = "a@moamoa.test", password = "pw", profileColor = ProfileColor.DARK, termsAgreedAt = OffsetDateTime.now()),
+                        AppUser(id = memberUserId, name = "이모아", email = "b@moamoa.test", password = "pw", termsAgreedAt = OffsetDateTime.now())
+                    )
+                )
 
                 val response = memberService.getMembers(meetingId, memberUserId)
 
                 response.members shouldHaveSize 2
                 response.members[0].memberId shouldBe 100L
                 response.members[0].role shouldBe MemberRole.ADMIN
-                response.members[0].nickname.shouldBeNull()
+                response.members[0].userName shouldBe "김모아"
+                response.members[0].profileColor shouldBe ProfileColor.DARK
+                response.members[1].userName shouldBe "이모아"
+                response.members[1].profileColor shouldBe ProfileColor.LIGHT_BLUE
                 response.members[1].memberId shouldBe 200L
                 response.members[1].role shouldBe MemberRole.MEMBER
             }
@@ -102,23 +129,25 @@ class MemberServiceTests : BehaviorSpec({
 
     Given("모임을 탈퇴할 때") {
         When("MEMBER가 요청하면") {
-            Then("투표 응답과 출석 기록을 먼저 삭제한 뒤 구성원 정보를 삭제하고 meetingId를 반환한다") {
+            Then("투표 응답, 출석 기록, 공지 읽음 기록을 먼저 삭제한 뒤 구성원 정보를 삭제하고 meetingId를 반환한다") {
                 val response = memberService.leaveMeeting(meetingId, memberUserId)
 
                 response.meetingId shouldBe meetingId
-                val order = inOrder(voteRepository, attendanceRepository, memberRepository)
+                val order = inOrder(voteRepository, attendanceRepository, noticeReadRepository, memberRepository)
                 order.verify(voteRepository).deleteAllByMemberId(200L)
                 order.verify(attendanceRepository).deleteAllByMemberId(200L)
+                order.verify(noticeReadRepository).deleteAllByMemberId(200L)
                 order.verify(memberRepository).delete(member)
             }
         }
         When("ADMIN이 요청하면") {
-            Then("422 UNPROCESSABLE_ENTITY 예외가 발생하고 구성원 정보와 투표 응답·출석 기록은 유지된다") {
+            Then("422 UNPROCESSABLE_ENTITY 예외가 발생하고 구성원 정보와 투표 응답·출석·공지 읽음 기록은 유지된다") {
                 shouldThrow<ApiException> {
                     memberService.leaveMeeting(meetingId, adminUserId)
                 }.errorCode shouldBe ErrorCode.UNPROCESSABLE_ENTITY
                 verify(voteRepository, never()).deleteAllByMemberId(anyLong())
                 verify(attendanceRepository, never()).deleteAllByMemberId(anyLong())
+                verify(noticeReadRepository, never()).deleteAllByMemberId(anyLong())
                 verify(memberRepository, never()).delete(any(Member::class.java))
             }
         }

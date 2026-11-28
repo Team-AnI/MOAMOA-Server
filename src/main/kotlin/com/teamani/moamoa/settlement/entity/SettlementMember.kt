@@ -47,6 +47,10 @@ class SettlementMember(
     @Column(nullable = true)
     var rejectionReason: String? = null,
 
+    // 관리자가 환불 처리한 일시
+    @Column(nullable = true)
+    var refundedAt: OffsetDateTime? = null,
+
     // 기본 키 (PK)
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -70,5 +74,11 @@ class SettlementMember(
     fun reject(reason: String?) {
         status = PaymentStatus.UNPAID
         rejectionReason = reason
+    }
+
+    // 환불 처리: 취소된 정산의 완납 금액을 앱 밖에서 돌려준 기록
+    fun refund(refundedAt: OffsetDateTime) {
+        status = PaymentStatus.REFUNDED
+        this.refundedAt = refundedAt
     }
 }

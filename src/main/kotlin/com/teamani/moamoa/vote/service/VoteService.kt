@@ -7,6 +7,8 @@ import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.schedule.entity.Schedule
 import com.teamani.moamoa.schedule.entity.ScheduleStatus
 import com.teamani.moamoa.schedule.repository.ScheduleRepository
+import com.teamani.moamoa.user.entity.ProfileColor
+import com.teamani.moamoa.user.repository.AppUserRepository
 import com.teamani.moamoa.vote.dto.MyVoteSubmitRequest
 import com.teamani.moamoa.vote.dto.MyVoteSubmitResponse
 import com.teamani.moamoa.vote.dto.VoteCandidateResponse
@@ -33,7 +35,8 @@ class VoteService(
     private val memberService: MemberService,
     private val memberRepository: MemberRepository,
     private val scheduleRepository: ScheduleRepository,
-    private val voteRepository: VoteRepository
+    private val voteRepository: VoteRepository,
+    private val appUserRepository: AppUserRepository
 ) {
 
     @Transactional
@@ -119,7 +122,8 @@ class VoteService(
         scheduleId: Long,
         request: MyVoteSubmitRequest
     ): MyVoteSubmitResponse {
-        val me = memberService.validateMember(meetingId, userId)
+        // 요청한 구성원을 잠가, 제출 중에 모임을 나가 투표 응답이 남는 일을 막음 (잠금 순서: 구성원 → 일정)
+        val me = memberService.validateMemberForUpdate(meetingId, userId)
         val myMemberId = checkNotNull(me.id) { "구성원 식별자가 없습니다." }
         val schedule = findScheduleForUpdate(meetingId, scheduleId)
         val votes = findVotes(scheduleId)
@@ -186,12 +190,17 @@ class VoteService(
             .mapValues { (_, memberVotes) -> memberVotes.maxOf { it.createdAt } }
 
         // 조회 시점의 구성원 전체 대상 (투표 생성 후 가입자 포함, 1-7과 같은 memberId 오름차순)
-        val members = memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId).map { member ->
+        val meetingMembers = memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId)
+        // 구성원마다 사용자를 조회하지 않도록 한 번에 조회
+        val usersById = appUserRepository.findAllById(meetingMembers.map { it.userId }).associateBy { it.id }
+        val members = meetingMembers.map { member ->
             val memberId = checkNotNull(member.id) { "구성원 식별자가 없습니다." }
             val submittedAt = submittedAtByMemberId[memberId]
+            val user = usersById[member.userId]
             VoteMemberResponse(
                 memberId = memberId,
-                nickname = null,
+                userName = user?.name ?: WITHDRAWN_USER_NAME,
+                profileColor = user?.profileColor ?: ProfileColor.LIGHT_BLUE,
                 responded = submittedAt != null,
                 submittedAt = submittedAt?.withOffsetSameInstant(KST)
             )
@@ -279,6 +288,7 @@ class VoteService(
 
     companion object {
         private const val VOTE_NOT_FOUND_MESSAGE = "투표를 찾을 수 없습니다."
+        private const val WITHDRAWN_USER_NAME = "탈퇴한 사용자"
 
         // 응답 일시는 KST(+09:00) 기준
         private val KST: ZoneOffset = ZoneOffset.ofHours(9)

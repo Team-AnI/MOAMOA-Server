@@ -32,7 +32,7 @@ class GlobalExceptionHandler {
     ): ResponseEntity<ErrorResponse> {
         logError(ex.errorCode, ex, request)
         return ResponseEntity.status(ex.errorCode.status)
-            .body(ErrorResponseFactory.of(ex.errorCode, ex.message))
+            .body(ErrorResponseFactory.of(ex.errorCode, ex.message, ex.details))
     }
 
     @ExceptionHandler(MethodArgumentNotValidException::class)

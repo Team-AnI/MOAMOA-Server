@@ -1,5 +1,6 @@
 package com.teamani.moamoa.settlement.controller
 
+import com.teamani.moamoa.global.auth.JwtTokenProvider
 import com.teamani.moamoa.global.exception.ApiException
 import com.teamani.moamoa.global.exception.ErrorCode
 import com.teamani.moamoa.settlement.dto.RegularDuesCreateRequest
@@ -13,11 +14,14 @@ import com.teamani.moamoa.settlement.service.RegularDuesService
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import org.mockito.Mockito.`when`
+import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.ResultActionsDsl
 import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
@@ -36,6 +40,9 @@ class RegularDuesControllerTests : BehaviorSpec() {
     @MockitoBean
     lateinit var regularDuesService: RegularDuesService
 
+    @MockitoBean
+    lateinit var jwtTokenProvider: JwtTokenProvider
+
     private val response = RegularDuesResponse(
         regularDuesId = 7L,
         title = "월 회비",
@@ -52,6 +59,10 @@ class RegularDuesControllerTests : BehaviorSpec() {
     )
 
     init {
+        beforeTest {
+            `when`(jwtTokenProvider.getUserId(ACCESS_TOKEN)).thenReturn(1L)
+        }
+
         Given("유효한 정기 회비 등록 요청(POST /v1/meetings/{meetingId}/regular-dues)이 주어졌을 때") {
             val request = RegularDuesCreateRequest(
                 title = "월 회비",
@@ -69,10 +80,11 @@ class RegularDuesControllerTests : BehaviorSpec() {
             When("API를 호출하면") {
                 Then("201 Created와 공통 응답 형식으로 등록 요약을 반환한다") {
                     `when`(regularDuesService.createRegularDues(1L, 1L, request)).thenReturn(
-                        RegularDuesCreateResponse(regularDuesId = 7L, title = "월 회비", isActive = true)
+                        RegularDuesCreateResponse(regularDuesId = 7L, title = "월 회비", isActive = true, currentPeriodBilled = false)
                     )
 
                     mockMvc.post("/v1/meetings/1/regular-dues") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """
                             {
@@ -116,10 +128,11 @@ class RegularDuesControllerTests : BehaviorSpec() {
             When("API를 호출하면") {
                 Then("검증을 통과해 201 Created를 반환한다") {
                     `when`(regularDuesService.createRegularDues(1L, 1L, request)).thenReturn(
-                        RegularDuesCreateResponse(regularDuesId = 8L, title = "월 회비", isActive = true)
+                        RegularDuesCreateResponse(regularDuesId = 8L, title = "월 회비", isActive = true, currentPeriodBilled = false)
                     )
 
                     mockMvc.post("/v1/meetings/1/regular-dues") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """
                             {
@@ -137,6 +150,47 @@ class RegularDuesControllerTests : BehaviorSpec() {
                     }.andExpect {
                         status { isCreated() }
                         jsonPath("$.data.regularDuesId") { value(8) }
+                    }
+                }
+            }
+        }
+
+        Given("1인당 금액이 상한(5,000,000원)인 정기 회비 등록 요청이 주어졌을 때") {
+            val request = RegularDuesCreateRequest(
+                title = "월 회비",
+                amount = 5_000_000,
+                cycleType = "MONTHLY",
+                cycleDay = "10",
+                dueDays = 7,
+                bankName = "국민은행",
+                accountNumber = "123456789012",
+                accountHolder = "김모아"
+            )
+
+            When("API를 호출하면") {
+                Then("검증을 통과해 201 Created를 반환한다") {
+                    `when`(regularDuesService.createRegularDues(1L, 1L, request)).thenReturn(
+                        RegularDuesCreateResponse(regularDuesId = 9L, title = "월 회비", isActive = true, currentPeriodBilled = false)
+                    )
+
+                    mockMvc.post("/v1/meetings/1/regular-dues") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """
+                            {
+                              "title": "월 회비",
+                              "amount": 5000000,
+                              "cycleType": "MONTHLY",
+                              "cycleDay": "10",
+                              "dueDays": 7,
+                              "bankName": "국민은행",
+                              "accountNumber": "123456789012",
+                              "accountHolder": "김모아"
+                            }
+                        """.trimIndent()
+                    }.andExpect {
+                        status { isCreated() }
+                        jsonPath("$.data.regularDuesId") { value(9) }
                     }
                 }
             }
@@ -160,6 +214,7 @@ class RegularDuesControllerTests : BehaviorSpec() {
                 "공백 title" to json(valid + ("title" to "\"   \"")),
                 "50자 초과 title" to json(valid + ("title" to "\"${"가".repeat(51)}\"")),
                 "amount 0" to json(valid + ("amount" to "0")),
+                "상한(5,000,000원) 초과 amount" to json(valid + ("amount" to "5000001")),
                 "cycleType 누락" to json(valid - "cycleType"),
                 "잘못된 cycleType" to json(valid + ("cycleType" to "\"DAILY\"")),
                 "cycleDay 누락" to json(valid - "cycleDay"),
@@ -173,6 +228,7 @@ class RegularDuesControllerTests : BehaviorSpec() {
                 When("$case 요청으로 등록 API를 호출하면") {
                     Then("400 Bad Request와 VALIDATION_ERROR를 반환한다") {
                         mockMvc.post("/v1/meetings/1/regular-dues") {
+                            header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                             contentType = MediaType.APPLICATION_JSON
                             content = requestJson
                         }.andExpect {
@@ -190,7 +246,9 @@ class RegularDuesControllerTests : BehaviorSpec() {
                     `when`(regularDuesService.getRegularDuesList(1L, 1L))
                         .thenReturn(RegularDuesListResponse(regularDues = listOf(response)))
 
-                    mockMvc.get("/v1/meetings/1/regular-dues").andExpect {
+                    mockMvc.get("/v1/meetings/1/regular-dues") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.regularDues[0].regularDuesId") { value(7) }
                         jsonPath("$.data.regularDues[0].cycleType") { value("MONTHLY") }
@@ -212,6 +270,7 @@ class RegularDuesControllerTests : BehaviorSpec() {
                     `when`(regularDuesService.updateRegularDues(1L, 1L, 7L, request)).thenReturn(response)
 
                     mockMvc.patch("/v1/meetings/1/regular-dues/7") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{ "amount": 15000, "isActive": false }"""
                     }.andExpect {
@@ -232,6 +291,7 @@ class RegularDuesControllerTests : BehaviorSpec() {
                         .thenThrow(ApiException(ErrorCode.VALIDATION_ERROR, "회비명은(는) 비울 수 없습니다."))
 
                     mockMvc.patch("/v1/meetings/1/regular-dues/7") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                         contentType = MediaType.APPLICATION_JSON
                         content = """{ "title": null }"""
                     }.andExpect {
@@ -247,6 +307,7 @@ class RegularDuesControllerTests : BehaviorSpec() {
                 "공백 title" to """{ "title": "   " }""",
                 "50자 초과 title" to """{ "title": "${"가".repeat(51)}" }""",
                 "amount 0" to """{ "amount": 0 }""",
+                "상한(5,000,000원) 초과 amount" to """{ "amount": 5000001 }""",
                 "잘못된 cycleType" to """{ "cycleType": "DAILY", "cycleDay": "MON" }""",
                 "잘못된 sendTime" to """{ "sendTime": "25:00" }""",
                 "음수 dueDays" to """{ "dueDays": -1 }"""
@@ -256,6 +317,7 @@ class RegularDuesControllerTests : BehaviorSpec() {
                 When("$case 요청으로 수정 API를 호출하면") {
                     Then("400 Bad Request와 VALIDATION_ERROR를 반환한다") {
                         mockMvc.patch("/v1/meetings/1/regular-dues/7") {
+                            header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
                             contentType = MediaType.APPLICATION_JSON
                             content = requestJson
                         }.andExpect {
@@ -273,7 +335,9 @@ class RegularDuesControllerTests : BehaviorSpec() {
                     `when`(regularDuesService.deleteRegularDues(1L, 1L, 7L))
                         .thenReturn(RegularDuesDeleteResponse(regularDuesId = 7L))
 
-                    mockMvc.delete("/v1/meetings/1/regular-dues/7").andExpect {
+                    mockMvc.delete("/v1/meetings/1/regular-dues/7") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.regularDuesId") { value(7) }
                     }
@@ -287,7 +351,9 @@ class RegularDuesControllerTests : BehaviorSpec() {
                     `when`(regularDuesService.deleteRegularDues(1L, 1L, 999L))
                         .thenThrow(ApiException(ErrorCode.NOT_FOUND, "정기 회비를 찾을 수 없습니다."))
 
-                    mockMvc.delete("/v1/meetings/1/regular-dues/999").andExpect {
+                    mockMvc.delete("/v1/meetings/1/regular-dues/999") {
+                        header(HttpHeaders.AUTHORIZATION, BEARER_TOKEN)
+                    }.andExpect {
                         status { isNotFound() }
                         jsonPath("$.success") { value(false) }
                         jsonPath("$.error.code") { value("NOT_FOUND") }
@@ -295,5 +361,30 @@ class RegularDuesControllerTests : BehaviorSpec() {
                 }
             }
         }
+
+        Given("액세스 토큰 없이 정기 회비 API를 요청할 때") {
+            listOf<Pair<String, () -> ResultActionsDsl>>(
+                "정기 회비 등록" to { mockMvc.post("/v1/meetings/1/regular-dues") { contentType = MediaType.APPLICATION_JSON; content = "{}" } },
+                "정기 회비 목록" to { mockMvc.get("/v1/meetings/1/regular-dues") },
+                "정기 회비 수정" to { mockMvc.patch("/v1/meetings/1/regular-dues/7") { contentType = MediaType.APPLICATION_JSON; content = "{}" } },
+                "정기 회비 삭제" to { mockMvc.delete("/v1/meetings/1/regular-dues/7") }
+            ).forEach { (api, call) ->
+                When("$api API를 호출하면") {
+                    Then("401 Unauthorized와 UNAUTHORIZED 공통 에러 응답을 반환하고 Service를 호출하지 않는다") {
+                        call().andExpect {
+                            status { isUnauthorized() }
+                            jsonPath("$.error.code") { value("UNAUTHORIZED") }
+                        }
+                        verifyNoInteractions(regularDuesService)
+                    }
+                }
+            }
+        }
+    }
+
+    companion object {
+        // 토큰 검증은 mock으로 대체: ACCESS_TOKEN을 보내면 사용자 1로 인증
+        private const val ACCESS_TOKEN = "test-access-token"
+        private const val BEARER_TOKEN = "Bearer $ACCESS_TOKEN"
     }
 }

@@ -16,6 +16,8 @@ import com.teamani.moamoa.member.service.MemberService
 import com.teamani.moamoa.schedule.entity.Schedule
 import com.teamani.moamoa.schedule.entity.ScheduleStatus
 import com.teamani.moamoa.schedule.repository.ScheduleRepository
+import com.teamani.moamoa.user.entity.ProfileColor
+import com.teamani.moamoa.user.repository.AppUserRepository
 import org.hibernate.exception.ConstraintViolationException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
@@ -27,7 +29,8 @@ class AttendanceService(
     private val memberService: MemberService,
     private val memberRepository: MemberRepository,
     private val scheduleRepository: ScheduleRepository,
-    private val attendanceRepository: AttendanceRepository
+    private val attendanceRepository: AttendanceRepository,
+    private val appUserRepository: AppUserRepository
 ) {
 
     @Transactional
@@ -38,17 +41,19 @@ class AttendanceService(
         request: AttendanceUpdateRequest
     ): AttendanceUpdateResponse {
         memberService.validateAdmin(meetingId, userId)
-        val schedule = findSchedule(meetingId, scheduleId)
 
         val items = requireNotNull(request.attendances) { "출석 목록은 1개 이상이어야 합니다." }
             .map { requireNotNull(it) { "출석 항목은 null일 수 없습니다." } }
         val memberIds = items.map { requireNotNull(it.memberId) { "구성원 ID는 필수입니다." } }
 
-        // 하위 리소스 404 → 상태 422 → 그 외 400 순서로 확인 (README 예외 처리 규칙)
-        val meetingMemberIds = memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId)
+        // 대상 구성원을 먼저 잠가 모임 나가기와 순서대로 처리 (잠금 순서: 구성원 → 일정, 나간 구성원은 아래에서 404)
+        val lockedMemberIds = memberRepository.findAllByMeetingIdAndIdInForUpdate(meetingId, memberIds.toSet())
             .map { checkNotNull(it.id) { "구성원 식별자가 없습니다." } }
             .toSet()
-        if (!meetingMemberIds.containsAll(memberIds)) {
+        val schedule = findScheduleForUpdate(meetingId, scheduleId)
+
+        // 하위 리소스 404 → 상태 422 → 그 외 400 순서로 확인 (README 예외 처리 규칙)
+        if (!lockedMemberIds.containsAll(memberIds)) {
             throw ApiException(ErrorCode.NOT_FOUND, "모임 구성원을 찾을 수 없습니다.")
         }
 
@@ -105,11 +110,16 @@ class AttendanceService(
             .associate { it.memberId to it.status }
 
         // 참석 응답과 관계없이 조회 시점의 구성원 전체 대상 (1-7과 같은 memberId 오름차순)
-        val attendances = memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId).map { member ->
+        val members = memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId)
+        // 구성원마다 사용자를 조회하지 않도록 한 번에 조회
+        val usersById = appUserRepository.findAllById(members.map { it.userId }).associateBy { it.id }
+        val attendances = members.map { member ->
             val memberId = checkNotNull(member.id) { "구성원 식별자가 없습니다." }
+            val user = usersById[member.userId]
             AttendanceMemberResponse(
                 memberId = memberId,
-                nickname = null,
+                userName = user?.name ?: WITHDRAWN_USER_NAME,
+                profileColor = user?.profileColor ?: ProfileColor.LIGHT_BLUE,
                 status = AttendanceViewStatus.from(statusByMemberId[memberId])
             )
         }
@@ -122,6 +132,11 @@ class AttendanceService(
         scheduleRepository.findByIdAndMeetingId(scheduleId, meetingId)
             ?: throw ApiException(ErrorCode.NOT_FOUND, "일정을 찾을 수 없습니다.")
 
+    // 일정 삭제와 같은 일정 잠금으로 조회해, 처리 중인 출석 기록이 삭제 뒤에 남지 않게 함
+    private fun findScheduleForUpdate(meetingId: Long, scheduleId: Long): Schedule =
+        scheduleRepository.findByIdAndMeetingIdForUpdate(scheduleId, meetingId)
+            ?: throw ApiException(ErrorCode.NOT_FOUND, "일정을 찾을 수 없습니다.")
+
     // 위반한 제약 이름 확인 (PostgreSQL은 제약 이름 그대로, H2는 "public.<이름> INDEX ..." 형태라 포함 여부로 비교)
     private fun DataIntegrityViolationException.violates(constraintName: String): Boolean {
         val violation = cause as? ConstraintViolationException ?: return false
@@ -131,5 +146,7 @@ class AttendanceService(
     companion object {
         // 출석 처리가 가능한 일정 상태 (CANCELED·VOTING은 422)
         private val CHECKABLE_SCHEDULE_STATUSES = setOf(ScheduleStatus.SCHEDULED, ScheduleStatus.CONFIRMED)
+
+        private const val WITHDRAWN_USER_NAME = "탈퇴한 사용자"
     }
 }

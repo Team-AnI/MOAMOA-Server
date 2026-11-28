@@ -13,6 +13,9 @@ import java.time.OffsetDateTime
 data class SettlementCreateRequest(
     val scheduleId: Long? = null,
 
+    // 이 정산으로 대체할 취소된 정산 ID (4-12)
+    val replacesSettlementId: Long? = null,
+
     @field:NotBlank(message = "정산명은 필수입니다.")
     @field:Size(max = 50, message = "정산명은 50자 이하여야 합니다.")
     val title: String?,
@@ -67,6 +70,8 @@ data class SettlementSummaryResponse(
     val dueAt: OffsetDateTime,
     val createdAt: OffsetDateTime,
     val status: SettlementStatus,
+    // 취소 일시 (취소되지 않았으면 null)
+    val canceledAt: OffsetDateTime?,
     val myAmount: Int?,
     val myPaymentStatus: PaymentStatus?,
     val myConfirmedAt: OffsetDateTime?
@@ -76,6 +81,9 @@ data class SettlementDetailResponse(
     val settlementId: Long,
     val title: String,
     val scheduleId: Long?,
+    // 연결된 일정의 제목·시작 일시 (연결된 일정이 없으면 null)
+    val scheduleTitle: String?,
+    val scheduleStartAt: OffsetDateTime?,
     val totalAmount: Int,
     val bankName: String,
     val accountNumber: String,
@@ -83,6 +91,12 @@ data class SettlementDetailResponse(
     val dueAt: OffsetDateTime,
     val status: SettlementStatus,
     val noticeId: Long?,
+    // 취소 일시·사유 (취소되지 않았거나 사유 없이 취소하면 null)
+    val canceledAt: OffsetDateTime?,
+    val cancelReason: String?,
+    // 이 정산이 대체한 취소된 정산 / 이 취소된 정산을 대체한 정산 (연결이 없으면 null)
+    val replacesSettlementId: Long?,
+    val replacedBySettlementId: Long?,
     // 대상자가 아니면 null
     val myPayment: MyPaymentResponse?,
     val summary: PaymentSummaryResponse,
@@ -101,6 +115,8 @@ data class PaymentSummaryResponse(
     val unpaidCount: Int,
     val pendingCount: Int,
     val paidCount: Int,
+    val refundedCount: Int,
+    // 완납(PAID) 금액만 합산
     val paidAmount: Int
 )
 
@@ -131,9 +147,31 @@ data class PaymentRejectResponse(
 data class PaymentResponse(
     val paymentId: Long,
     val memberId: Long,
-    // User 도메인 연동 전까지 null
-    val userName: String?,
+    // 모임을 나갔거나 탈퇴한 구성원은 "탈퇴한 사용자"
+    val userName: String,
     val amount: Int,
     val status: PaymentStatus,
-    val submittedAt: OffsetDateTime?
+    val submittedAt: OffsetDateTime?,
+    val refundedAt: OffsetDateTime?
+)
+
+// 취소 사유는 선택 입력, 요청 본문 없이 취소해도 됨
+data class SettlementCancelRequest(
+    @field:Size(max = 255, message = "취소 사유는 255자 이하여야 합니다.")
+    val reason: String? = null
+)
+
+data class SettlementCancelResponse(
+    val settlementId: Long,
+    val status: SettlementStatus,
+    val canceledAt: OffsetDateTime,
+    val cancelReason: String?,
+    // 새 취소 안내 공지 ID (연결된 공지가 없었으면 null)
+    val noticeId: Long?
+)
+
+data class PaymentRefundResponse(
+    val paymentId: Long,
+    val status: PaymentStatus,
+    val refundedAt: OffsetDateTime
 )

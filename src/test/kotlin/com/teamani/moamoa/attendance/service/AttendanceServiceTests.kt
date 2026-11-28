@@ -13,9 +13,14 @@ import com.teamani.moamoa.member.entity.Member
 import com.teamani.moamoa.member.entity.MemberRole
 import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.member.service.MemberService
+import com.teamani.moamoa.notice.repository.NoticeReadRepository
 import com.teamani.moamoa.schedule.entity.Schedule
 import com.teamani.moamoa.schedule.entity.ScheduleStatus
 import com.teamani.moamoa.schedule.repository.ScheduleRepository
+import com.teamani.moamoa.schedule.repository.ScheduleResponseRepository
+import com.teamani.moamoa.user.entity.AppUser
+import com.teamani.moamoa.user.entity.ProfileColor
+import com.teamani.moamoa.user.repository.AppUserRepository
 import com.teamani.moamoa.vote.repository.VoteRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
@@ -26,9 +31,12 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.hibernate.exception.ConstraintViolationException
 import org.mockito.ArgumentCaptor
+import org.mockito.ArgumentMatchers.anyCollection
 import org.mockito.ArgumentMatchers.anyList
 import org.mockito.ArgumentMatchers.anyLong
+import org.mockito.ArgumentMatchers.eq
 import org.mockito.Mockito.`when`
+import org.mockito.Mockito.inOrder
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.reset
@@ -43,8 +51,17 @@ class AttendanceServiceTests : BehaviorSpec({
     val memberRepository: MemberRepository = mock(MemberRepository::class.java)
     val scheduleRepository: ScheduleRepository = mock(ScheduleRepository::class.java)
     val attendanceRepository: AttendanceRepository = mock(AttendanceRepository::class.java)
-    val memberService = MemberService(meetingRepository, memberRepository, mock(VoteRepository::class.java), attendanceRepository)
-    val attendanceService = AttendanceService(memberService, memberRepository, scheduleRepository, attendanceRepository)
+    val appUserRepository: AppUserRepository = mock(AppUserRepository::class.java)
+    val memberService = MemberService(
+        meetingRepository,
+        memberRepository,
+        mock(VoteRepository::class.java),
+        attendanceRepository,
+        mock(NoticeReadRepository::class.java),
+        appUserRepository,
+        mock(ScheduleResponseRepository::class.java)
+    )
+    val attendanceService = AttendanceService(memberService, memberRepository, scheduleRepository, attendanceRepository, appUserRepository)
 
     val meetingId = 1L
     val scheduleId = 5L
@@ -66,6 +83,15 @@ class AttendanceServiceTests : BehaviorSpec({
         startsAt: OffsetDateTime = OffsetDateTime.now().plusDays(1)
     ) = Schedule(meetingId = meetingId, title = "10월 정기 모임", startsAt = startsAt, status = status, id = scheduleId)
 
+    fun appUser(id: Long, name: String, color: ProfileColor) = AppUser(
+        name = name,
+        email = "user$id@moamoa.test",
+        password = "password",
+        profileColor = color,
+        termsAgreedAt = OffsetDateTime.now(),
+        id = id
+    )
+
     fun attendance(memberId: Long, status: AttendanceStatus) =
         Attendance(memberId = memberId, scheduleId = scheduleId, status = status, createdAt = firstCheckedAt, id = memberId + 1000L)
 
@@ -74,6 +100,7 @@ class AttendanceServiceTests : BehaviorSpec({
 
     fun stubSchedule(schedule: Schedule?, attendances: List<Attendance> = emptyList()) {
         `when`(scheduleRepository.findByIdAndMeetingId(scheduleId, meetingId)).thenReturn(schedule)
+        `when`(scheduleRepository.findByIdAndMeetingIdForUpdate(scheduleId, meetingId)).thenReturn(schedule)
         `when`(attendanceRepository.findAllByScheduleId(scheduleId)).thenReturn(attendances)
     }
 
@@ -85,15 +112,33 @@ class AttendanceServiceTests : BehaviorSpec({
     }
 
     beforeTest {
-        reset(meetingRepository, memberRepository, scheduleRepository, attendanceRepository)
+        reset(meetingRepository, memberRepository, scheduleRepository, attendanceRepository, appUserRepository)
         `when`(meetingRepository.existsByIdAndEndedAtIsNull(meetingId)).thenReturn(true)
         listOf(admin, member, quietMember).forEach {
             `when`(memberRepository.findByMeetingIdAndUserId(meetingId, it.userId)).thenReturn(it)
         }
         `when`(memberRepository.findAllByMeetingIdOrderByIdAsc(meetingId)).thenReturn(listOf(admin, member, quietMember))
+        // 출석 대상 구성원 잠금 조회: 요청한 ID 중 이 모임 구성원만 반환 (다른 모임 구성원은 조회되지 않음)
+        `when`(memberRepository.findAllByMeetingIdAndIdInForUpdate(eq(meetingId), anyCollection())).thenAnswer { invocation ->
+            val ids = invocation.getArgument<Collection<Long>>(1)
+            listOf(admin, member, quietMember).filter { it.id in ids }
+        }
     }
 
     Given("출석 처리 요청이 주어졌을 때") {
+        When("ADMIN이 여러 구성원의 출석을 보내면") {
+            Then("출석 대상 구성원을 잠근 뒤 일정을 잠근다 (모임 나가기·투표 제출과 같은 구성원 → 일정 순서)") {
+                stubSchedule(schedule())
+
+                attendanceService.updateAttendances(
+                    meetingId, adminUserId, scheduleId, request(300L to "ABSENT", 200L to "LATE")
+                )
+
+                val lockOrder = inOrder(memberRepository, scheduleRepository)
+                lockOrder.verify(memberRepository).findAllByMeetingIdAndIdInForUpdate(meetingId, setOf(300L, 200L))
+                lockOrder.verify(scheduleRepository).findByIdAndMeetingIdForUpdate(scheduleId, meetingId)
+            }
+        }
         When("ADMIN이 처음 체크하는 구성원과 이미 체크한 구성원을 함께 보내면") {
             Then("기존 기록은 상태와 변경 일시만 바꾸고 새 기록을 만들며, 보낸 항목을 요청 순서대로 반환한다") {
                 val checked = attendance(200L, AttendanceStatus.PRESENT)
@@ -174,7 +219,7 @@ class AttendanceServiceTests : BehaviorSpec({
                 shouldThrow<ApiException> {
                     attendanceService.updateAttendances(meetingId, adminUserId, scheduleId, request(200L to "PRESENT"))
                 }.errorCode shouldBe ErrorCode.NOT_FOUND
-                verify(scheduleRepository, never()).findByIdAndMeetingId(anyLong(), anyLong())
+                verify(scheduleRepository, never()).findByIdAndMeetingIdForUpdate(anyLong(), anyLong())
             }
         }
         When("일정이 없거나 다른 모임의 일정이면") {
@@ -290,6 +335,10 @@ class AttendanceServiceTests : BehaviorSpec({
                     schedule(),
                     listOf(attendance(200L, AttendanceStatus.LATE), attendance(100L, AttendanceStatus.PRESENT))
                 )
+                // 사용자 정보가 없는 구성원(quietMember)은 탈퇴한 사용자로 표시
+                `when`(appUserRepository.findAllById(listOf(adminUserId, memberUserId, quietUserId))).thenReturn(
+                    listOf(appUser(adminUserId, "김모아", ProfileColor.BLUE), appUser(memberUserId, "이모아", ProfileColor.GRAY))
+                )
 
                 val response = attendanceService.getAttendances(meetingId, memberUserId, scheduleId)
 
@@ -297,7 +346,9 @@ class AttendanceServiceTests : BehaviorSpec({
                 response.attendances.map { it.memberId } shouldContainExactly listOf(100L, 200L, 300L)
                 response.attendances.map { it.status } shouldContainExactly
                     listOf(AttendanceViewStatus.PRESENT, AttendanceViewStatus.LATE, AttendanceViewStatus.UNCHECKED)
-                response.attendances.map { it.nickname } shouldContainExactly listOf(null, null, null)
+                response.attendances.map { it.userName } shouldContainExactly listOf("김모아", "이모아", "탈퇴한 사용자")
+                response.attendances.map { it.profileColor } shouldContainExactly
+                    listOf(ProfileColor.BLUE, ProfileColor.GRAY, ProfileColor.LIGHT_BLUE)
             }
         }
         When("결석으로 체크된 구성원이 있으면") {

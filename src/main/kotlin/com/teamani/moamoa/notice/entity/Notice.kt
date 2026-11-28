@@ -15,7 +15,7 @@ class Notice(
     @Column(nullable = false)
     val meetingId: Long,
 
-    // 공지 작성자(회원) ID
+    // 공지 작성자 구성원(member) ID
     @Column(nullable = false)
     val membersId: Long,
 

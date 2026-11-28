@@ -4,6 +4,7 @@ import com.teamani.moamoa.attendance.dto.AttendanceListResponse
 import com.teamani.moamoa.attendance.dto.AttendanceUpdateRequest
 import com.teamani.moamoa.attendance.dto.AttendanceUpdateResponse
 import com.teamani.moamoa.attendance.service.AttendanceService
+import com.teamani.moamoa.global.auth.CurrentUserId
 import com.teamani.moamoa.global.response.CommonResponse
 import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
@@ -22,12 +23,11 @@ class AttendanceController(
 
     @PatchMapping
     fun updateAttendances(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @PathVariable scheduleId: Long,
         @Valid @RequestBody request: AttendanceUpdateRequest
     ): ResponseEntity<CommonResponse<AttendanceUpdateResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: AttendanceUpdateResponse =
             attendanceService.updateAttendances(meetingId, currentUserId, scheduleId, request)
 
@@ -36,11 +36,10 @@ class AttendanceController(
 
     @GetMapping
     fun getAttendances(
+        @CurrentUserId currentUserId: Long,
         @PathVariable meetingId: Long,
         @PathVariable scheduleId: Long
     ): ResponseEntity<CommonResponse<AttendanceListResponse>> {
-        val currentUserId = 1L // TODO: 인증 구현 시 실제 사용자 ID로 교체
-
         val response: AttendanceListResponse = attendanceService.getAttendances(meetingId, currentUserId, scheduleId)
 
         return ResponseEntity.ok(CommonResponse(data = response))

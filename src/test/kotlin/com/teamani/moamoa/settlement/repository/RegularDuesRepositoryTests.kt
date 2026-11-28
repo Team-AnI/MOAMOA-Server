@@ -1,5 +1,10 @@
 package com.teamani.moamoa.settlement.repository
 
+import com.teamani.moamoa.meeting.entity.Meeting
+import com.teamani.moamoa.meeting.repository.MeetingRepository
+import com.teamani.moamoa.member.entity.Member
+import com.teamani.moamoa.member.entity.MemberRole
+import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.settlement.entity.CycleType
 import com.teamani.moamoa.settlement.entity.RegularDues
 import com.teamani.moamoa.settlement.entity.Settlement
@@ -35,6 +40,12 @@ class RegularDuesRepositoryTests : BehaviorSpec() {
 
     @Autowired
     lateinit var regularDuesService: RegularDuesService
+
+    @Autowired
+    lateinit var meetingRepository: MeetingRepository
+
+    @Autowired
+    lateinit var memberRepository: MemberRepository
 
     init {
         Given("한 모임의 정기 회비 여러 개와 다른 모임의 정기 회비가 저장되어 있을 때") {
@@ -107,14 +118,16 @@ class RegularDuesRepositoryTests : BehaviorSpec() {
         }
 
         Given("회차 정산이 있는 정기 회비를 Service로 삭제할 때") {
-            val meetingId = 9305L
+            // 삭제는 관리자 권한을 확인하므로 실제 모임과 관리자 구성원을 저장
+            val meetingId = checkNotNull(meetingRepository.save(Meeting(name = "모아모아", inviteCode = "DUES9305")).id)
+            memberRepository.save(Member(meetingId = meetingId, userId = ADMIN_USER_ID, role = MemberRole.ADMIN))
             val duesId = checkNotNull(regularDuesRepository.save(regularDues(meetingId)).id)
             val billedId = checkNotNull(
                 settlementRepository.save(settlement(meetingId, duesId, LocalDate.parse("2026-10-01"))).id
             )
 
             When("deleteRegularDues 메서드를 호출하면") {
-                regularDuesService.deleteRegularDues(meetingId, 1L, duesId)
+                regularDuesService.deleteRegularDues(meetingId, ADMIN_USER_ID, duesId)
 
                 Then("정기 회비는 삭제되고 회차 정산은 연결만 해제된 채 남는다") {
                     regularDuesRepository.findById(duesId).isPresent shouldBe false
@@ -148,4 +161,8 @@ class RegularDuesRepositoryTests : BehaviorSpec() {
         dueAt = OffsetDateTime.parse("2026-10-17T23:59:00+09:00"),
         billingPeriod = billingPeriod
     )
+
+    companion object {
+        private const val ADMIN_USER_ID = 9305L
+    }
 }

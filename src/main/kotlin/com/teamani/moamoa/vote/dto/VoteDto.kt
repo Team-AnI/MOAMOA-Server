@@ -1,6 +1,7 @@
 package com.teamani.moamoa.vote.dto
 
 import com.teamani.moamoa.schedule.entity.ScheduleStatus
+import com.teamani.moamoa.user.entity.ProfileColor
 import jakarta.validation.constraints.Future
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotEmpty
@@ -66,10 +67,10 @@ data class VoteParticipationResponse(
     val members: List<VoteMemberResponse>
 )
 
-// nickname은 User 도메인 구현 전까지 null 반환
 data class VoteMemberResponse(
     val memberId: Long,
-    val nickname: String?,
+    val userName: String,
+    val profileColor: ProfileColor,
     val responded: Boolean,
     val submittedAt: OffsetDateTime?
 )

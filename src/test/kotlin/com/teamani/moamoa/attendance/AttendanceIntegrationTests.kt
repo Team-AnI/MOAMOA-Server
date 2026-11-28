@@ -3,6 +3,7 @@ package com.teamani.moamoa.attendance
 import com.teamani.moamoa.attendance.entity.Attendance
 import com.teamani.moamoa.attendance.entity.AttendanceStatus
 import com.teamani.moamoa.attendance.repository.AttendanceRepository
+import com.teamani.moamoa.global.auth.JwtTokenProvider
 import com.teamani.moamoa.meeting.entity.Meeting
 import com.teamani.moamoa.meeting.repository.MeetingRepository
 import com.teamani.moamoa.member.entity.Member
@@ -11,6 +12,9 @@ import com.teamani.moamoa.member.repository.MemberRepository
 import com.teamani.moamoa.schedule.entity.Schedule
 import com.teamani.moamoa.schedule.entity.ScheduleStatus
 import com.teamani.moamoa.schedule.repository.ScheduleRepository
+import com.teamani.moamoa.user.entity.AppUser
+import com.teamani.moamoa.user.entity.ProfileColor
+import com.teamani.moamoa.user.repository.AppUserRepository
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.extensions.spring.SpringExtension
 import io.kotest.matchers.collections.shouldContainExactly
@@ -22,6 +26,7 @@ import org.mockito.Mockito.doAnswer
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
@@ -31,6 +36,7 @@ import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import java.time.OffsetDateTime
+import java.util.UUID
 
 // 실제 트랜잭션·DB 제약을 거친 출석 처리·조회 흐름과 모임 탈퇴 연동 검증 (Controller·Service 테스트는 mock 사용)
 @SpringBootTest
@@ -42,6 +48,9 @@ class AttendanceIntegrationTests : BehaviorSpec() {
 
     @Autowired
     lateinit var mockMvc: MockMvc
+
+    @Autowired
+    lateinit var jwtTokenProvider: JwtTokenProvider
 
     @Autowired
     lateinit var jdbcTemplate: JdbcTemplate
@@ -58,6 +67,9 @@ class AttendanceIntegrationTests : BehaviorSpec() {
     @MockitoSpyBean
     lateinit var attendanceRepository: AttendanceRepository
 
+    @Autowired
+    lateinit var appUserRepository: AppUserRepository
+
     private val startsAt = OffsetDateTime.parse("2026-11-01T19:00:00+09:00")
 
     private fun saveMeeting(inviteCode: String): Long =
@@ -70,6 +82,19 @@ class AttendanceIntegrationTests : BehaviorSpec() {
         checkNotNull(
             scheduleRepository.save(
                 Schedule(meetingId = meetingId, title = "11월 정기 모임", startsAt = startsAt, status = status)
+            ).id
+        )
+
+    private fun saveUser(name: String, profileColor: ProfileColor): Long =
+        checkNotNull(
+            appUserRepository.save(
+                AppUser(
+                    name = name,
+                    email = "attendance-${UUID.randomUUID()}@moamoa.test",
+                    password = "password",
+                    profileColor = profileColor,
+                    termsAgreedAt = OffsetDateTime.now()
+                )
             ).id
         )
 
@@ -96,6 +121,7 @@ class AttendanceIntegrationTests : BehaviorSpec() {
 
                     // 6-1 첫 처리
                     mockMvc.patch("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":$firstMemberId,"status":"PRESENT"}]}"""
                     }.andExpect {
@@ -106,14 +132,18 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                     }
 
                     // 6-2 조회: 체크하지 않은 구성원은 UNCHECKED
-                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/attendances").andExpect {
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.attendances.length()") { value(3) }
                         jsonPath("$.data.attendances[0].memberId") { value(adminMemberId.toInt()) }
                         jsonPath("$.data.attendances[0].status") { value("UNCHECKED") }
                         jsonPath("$.data.attendances[1].memberId") { value(firstMemberId.toInt()) }
                         jsonPath("$.data.attendances[1].status") { value("PRESENT") }
-                        jsonPath("$.data.attendances[1].nickname") { value(null as Any?) }
+                        // 사용자 행이 없는 구성원은 탈퇴한 사용자로 표시
+                        jsonPath("$.data.attendances[1].userName") { value("탈퇴한 사용자") }
+                        jsonPath("$.data.attendances[1].profileColor") { value("LIGHT_BLUE") }
                         jsonPath("$.data.attendances[2].memberId") { value(secondMemberId.toInt()) }
                         jsonPath("$.data.attendances[2].status") { value("UNCHECKED") }
                     }
@@ -121,6 +151,7 @@ class AttendanceIntegrationTests : BehaviorSpec() {
 
                     // 6-1 수정: 기존 구성원 변경 + 새 구성원 추가
                     mockMvc.patch("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":$firstMemberId,"status":"LATE"},""" +
                             """{"memberId":$secondMemberId,"status":"ABSENT"}]}"""
@@ -130,7 +161,9 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                         jsonPath("$.data.attendances[1].status") { value("ABSENT") }
                     }
 
-                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/attendances").andExpect {
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.attendances[0].status") { value("UNCHECKED") }
                         jsonPath("$.data.attendances[1].status") { value("LATE") }
@@ -162,6 +195,7 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                     attendanceRepository.save(Attendance(checkedMemberId, scheduleId, AttendanceStatus.PRESENT))
 
                     mockMvc.patch("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":$checkedMemberId,"status":"LATE"},""" +
                             """{"memberId":$newMemberId,"status":"PRESENT"},""" +
@@ -195,6 +229,7 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                     }.`when`(attendanceRepository).findAllByScheduleId(anyLong())
 
                     mockMvc.patch("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":$checkedMemberId,"status":"ABSENT"},""" +
                             """{"memberId":$racedMemberId,"status":"PRESENT"}]}"""
@@ -221,6 +256,7 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                     attendanceRepository.save(Attendance(checkedMemberId, scheduleId, AttendanceStatus.PRESENT))
 
                     mockMvc.patch("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":$checkedMemberId,"status":"ABSENT"}]}"""
                     }.andExpect {
@@ -232,7 +268,9 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                         listOf(checkedMemberId to AttendanceStatus.PRESENT)
 
                     // 일반 구성원도 다른 구성원의 출석 현황은 조회 가능
-                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/attendances").andExpect {
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.attendances[2].memberId") { value(checkedMemberId.toInt()) }
                         jsonPath("$.data.attendances[2].status") { value("PRESENT") }
@@ -246,6 +284,7 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                     val scheduleId = saveSchedule(meetingId, ScheduleStatus.CANCELED)
 
                     mockMvc.patch("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":$adminMemberId,"status":"PRESENT"}]}"""
                     }.andExpect {
@@ -254,7 +293,9 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                     }
 
                     attendancesOf(scheduleId).map { it.memberId } shouldContainExactly emptyList()
-                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/attendances").andExpect {
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.attendances[0].status") { value("UNCHECKED") }
                     }
@@ -267,15 +308,82 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                     val otherScheduleId = saveSchedule(saveMeeting("ATTD0008"))
 
                     mockMvc.patch("/v1/meetings/$meetingId/schedules/$otherScheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
                         contentType = MediaType.APPLICATION_JSON
                         content = """{"attendances":[{"memberId":$adminMemberId,"status":"PRESENT"}]}"""
                     }.andExpect {
                         status { isNotFound() }
                         jsonPath("$.error.code") { value("NOT_FOUND") }
                     }
-                    mockMvc.get("/v1/meetings/$meetingId/schedules/$otherScheduleId/attendances").andExpect {
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$otherScheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
+                    }.andExpect {
                         status { isNotFound() }
                         jsonPath("$.error.code") { value("NOT_FOUND") }
+                    }
+                }
+            }
+        }
+
+        Given("ADMIN과 MEMBER가 있는 모임의 일정이 있을 때") {
+            When("토큰 없이, MEMBER의 토큰으로, ADMIN의 토큰으로 차례로 출석 처리를 요청하면") {
+                Then("토큰 없으면 401, MEMBER면 403으로 저장되지 않고, ADMIN의 요청만 저장된다") {
+                    val meetingId = saveMeeting("ATTD0010")
+                    saveMember(meetingId, USER_ID, MemberRole.ADMIN)
+                    val memberId = saveMember(meetingId, OTHER_USER_ID, MemberRole.MEMBER)
+                    val scheduleId = saveSchedule(meetingId)
+                    val body = """{"attendances":[{"memberId":$memberId,"status":"PRESENT"}]}"""
+
+                    mockMvc.patch("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        contentType = MediaType.APPLICATION_JSON
+                        content = body
+                    }.andExpect {
+                        status { isUnauthorized() }
+                        jsonPath("$.error.code") { value("UNAUTHORIZED") }
+                    }
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/attendances").andExpect {
+                        status { isUnauthorized() }
+                        jsonPath("$.error.code") { value("UNAUTHORIZED") }
+                    }
+                    mockMvc.patch("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer(OTHER_USER_ID))
+                        contentType = MediaType.APPLICATION_JSON
+                        content = body
+                    }.andExpect {
+                        status { isForbidden() }
+                        jsonPath("$.error.code") { value("FORBIDDEN") }
+                    }
+                    attendancesOf(scheduleId) shouldBe emptyList()
+
+                    mockMvc.patch("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer())
+                        contentType = MediaType.APPLICATION_JSON
+                        content = body
+                    }.andExpect { status { isOk() } }
+                    attendancesOf(scheduleId).map { it.memberId to it.status } shouldContainExactly
+                        listOf(memberId to AttendanceStatus.PRESENT)
+                }
+            }
+        }
+
+        Given("가입한 사용자들이 구성원인 모임의 일정이 있을 때") {
+            When("출석 현황을 조회하면") {
+                Then("각 구성원의 실제 이름과 프로필 색이 함께 나온다") {
+                    val adminUserId = saveUser("김모아", ProfileColor.BLUE)
+                    val memberUserId = saveUser("이모아", ProfileColor.DARK)
+                    val meetingId = saveMeeting("ATTD0010")
+                    saveMember(meetingId, adminUserId, MemberRole.ADMIN)
+                    saveMember(meetingId, memberUserId, MemberRole.MEMBER)
+                    val scheduleId = saveSchedule(meetingId)
+
+                    mockMvc.get("/v1/meetings/$meetingId/schedules/$scheduleId/attendances") {
+                        header(HttpHeaders.AUTHORIZATION, bearer(memberUserId))
+                    }.andExpect {
+                        status { isOk() }
+                        jsonPath("$.data.attendances[0].userName") { value("김모아") }
+                        jsonPath("$.data.attendances[0].profileColor") { value("BLUE") }
+                        jsonPath("$.data.attendances[1].userName") { value("이모아") }
+                        jsonPath("$.data.attendances[1].profileColor") { value("DARK") }
                     }
                 }
             }
@@ -298,7 +406,9 @@ class AttendanceIntegrationTests : BehaviorSpec() {
                         )
                     )
 
-                    mockMvc.delete("/v1/meetings/$meetingId/members/me").andExpect {
+                    mockMvc.delete("/v1/meetings/$meetingId/members/me") {
+                        header(HttpHeaders.AUTHORIZATION, "Bearer ${jwtTokenProvider.createAccessToken(USER_ID)}")
+                    }.andExpect {
                         status { isOk() }
                         jsonPath("$.data.meetingId") { value(meetingId.toInt()) }
                     }
@@ -311,8 +421,12 @@ class AttendanceIntegrationTests : BehaviorSpec() {
         }
     }
 
+    // 요청 사용자의 액세스 토큰으로 만든 Authorization 헤더 값
+    private fun bearer(userId: Long = USER_ID): String = "Bearer ${jwtTokenProvider.createAccessToken(userId)}"
+
     companion object {
-        // Controller 임시 로그인 사용자 (currentUserId = 1L)
+        // 기본 요청 사용자 (bearer()의 기본값)
         private const val USER_ID = 1L
+        private const val OTHER_USER_ID = 2L
     }
 }
